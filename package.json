@@ -1,0 +1,46 @@
+{
+  "name": "pi-aux-vision",
+  "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hu3rror/pi-aux-vision.git"
+  },
+  "homepage": "https://github.com/hu3rror/pi-aux-vision",
+  "bugs": { "url": "https://github.com/hu3rror/pi-aux-vision/issues" },
+  "description": "Registers a describe_image tool that routes image analysis to a configured vision model through pi's official pipeline.",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "vision",
+    "describe-image",
+    "image-analysis",
+    "gemini",
+    "claude"
+  ],
+  "license": "MIT",
+  "files": [
+    "index.ts",
+    "config.ts",
+    "discovery.ts",
+    "vision.ts",
+    "ui.ts",
+    "test-image.ts",
+    "README.md",
+    "README.zh-CN.md"
+  ],
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.0"
+  },
+  "scripts": {
+    "test": "node .test/build.js && node .test/test-run.mjs"
+  }
+}

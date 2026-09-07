@@ -1,0 +1,5 @@
+# 依赖安装目录
+node_modules/
+
+# esbuild 构建产物（由 .test/build.js 生成）
+.test/test-run.mjs
