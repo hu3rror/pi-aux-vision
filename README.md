@@ -1,6 +1,6 @@
 # pi-aux-vision
 
-[中文](README.zh-CN.md)
+[中文](README_zh-CN.md)
 
 Registers a `describe_image` native tool for Pi: the main model (e.g. `deepseek-v4-flash`, which has no image input) decides when to call it, passes an image path and a specific question, and the extension routes the request through pi's official pipeline to a configured vision model. The result comes back as a `tool_result` in the conversation context.
 

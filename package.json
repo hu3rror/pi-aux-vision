@@ -26,7 +26,7 @@
     "ui.ts",
     "test-image.ts",
     "README.md",
-    "README.zh-CN.md"
+    "README_zh-CN.md"
   ],
   "pi": {
     "extensions": ["./index.ts"]
