@@ -1,12 +1,14 @@
 {
   "name": "pi-aux-vision",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/hu3rror/pi-aux-vision.git"
   },
   "homepage": "https://github.com/hu3rror/pi-aux-vision",
-  "bugs": { "url": "https://github.com/hu3rror/pi-aux-vision/issues" },
+  "bugs": {
+    "url": "https://github.com/hu3rror/pi-aux-vision/issues"
+  },
   "description": "Registers a describe_image tool that routes image analysis to a configured vision model through pi's official pipeline.",
   "keywords": [
     "pi-package",
@@ -29,7 +31,9 @@
     "README_zh-CN.md"
   ],
   "pi": {
-    "extensions": ["./index.ts"]
+    "extensions": [
+      "./index.ts"
+    ]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
