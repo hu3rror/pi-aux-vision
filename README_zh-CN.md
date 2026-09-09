@@ -23,7 +23,7 @@ pi -e npm:pi-aux-vision
 - 启动时读取 `~/.pi/agent/aux-vision.json`;无配置则自动发现第一个可用(已认证且支持图像输入)的视觉模型并写入配置;配置的模型失效时自动回退。
 - 认证、协议序列化、重试全部走 pi 官方管线(`ctx.modelRegistry.complete`),支持 google-generative-ai / openai-completions / anthropic-messages 三种协议。
 - 图片上限 10MB(三家服务商限制交集);超限时用 pi 官方 `resizeImage` 自动压缩,压不动才报错。
-- 本会话内第一次调用 `describe_image`(无论成败)后,TUI footer 显示 `vision: provider/model` 并保持到会话结束——dim 的 `vision:` 前缀 + accent 的模型名,调用失败时 `!` 以 error 色追加;新会话恢复不显示,可用 `showInFooter` 关闭。
+- 本会话内第一次调用 `describe_image`(无论成败)或执行 `/vision test` 后,TUI footer 显示 `vision: provider/model` 并保持到会话结束——dim 的 `vision:` 前缀 + accent 的模型名,调用失败时 `!` 以 error 色追加;新会话恢复不显示,可用 `showInFooter` 关闭。
 
 ## 配置
 
@@ -43,7 +43,7 @@ pi -e npm:pi-aux-vision
 
 - `maxRetries`:重试次数(初始 + N 次,4xx 不重试,由官方管线处理)
 - `maxRetryDelayMs`:退避上限,单位毫秒
-- `showInFooter`:本会话第一次调用 `describe_image` 后是否在 TUI footer 显示 `vision: provider/model`(默认 `true`)
+- `showInFooter`:本会话第一次调用 `describe_image` 或 `/vision test` 后是否在 TUI footer 显示 `vision: provider/model`(默认 `true`)
 
 ## 命令
 

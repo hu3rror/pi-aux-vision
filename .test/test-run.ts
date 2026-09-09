@@ -297,4 +297,37 @@ function ok(name: string) {
   ok("/vision enable restores footer after re-enable");
 }
 
+// ---- 11. 接线:/vision test 也应触发 footer(本会话内实际调用了视觉模型)----
+{
+  setTestAgentDir(fs.mkdtempSync(path.join(os.tmpdir(), "aux-vision-test-wire-")));
+  saveConfig({ ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" });
+
+  const fake = makeFakePi();
+  extension(fake.pi as never);
+  const ctx = makeFakeCtx();
+  await fake.fire("session_start", {}, ctx);
+
+  const cmd = fake.command("vision");
+  assert.ok(cmd, "vision command registered");
+  const png = writePng("wire-test.png");
+  await cmd.handler(`test ${png}`, ctx);
+
+  // test 成功调用 → footer 显示上色文本
+  const last = ctx.uiStatusCalls.at(-1)!;
+  assert.strictEqual(last.key, "aux-vision");
+  assert.strictEqual(
+    last.text,
+    "[dim]vision: [/dim][accent]sensenova-anthropic/sensenova-6.8-flash-lite[/accent]",
+  );
+  ok("/vision test triggers footer display");
+
+  // test 失败 → footer 追加 error !(与 execute 一致)
+  const boom = makeFakeCtx(async () => {
+    throw new Error("401 unauthorized");
+  });
+  await cmd.handler(`test ${png}`, boom);
+  assert.match(boom.uiStatusCalls.at(-1)!.text!, /\[error\]!\[\/error\]$/);
+  ok("/vision test failure appends error !");
+}
+
 console.log(`\n${passed} tests passed`);

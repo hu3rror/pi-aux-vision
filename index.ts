@@ -359,6 +359,8 @@ export default function (pi: ExtensionAPI) {
             cfg,
             ctx.signal,
           );
+          // /vision test 也是本会话内实际调用视觉模型:与 execute 一致,成功/失败都算触发
+          applyFooterEvent({ type: "call", ok: !result.isError }, ctx);
           if (result.isError) {
             ctx.ui.notify(`aux-vision 测试失败:${result.content[0].text}`, "error");
             return;
