@@ -23,6 +23,7 @@ Manual install: drop the `pi-aux-vision/` directory under `~/.pi/agent/extension
 - On startup, reads `~/.pi/agent/aux-vision.json`; with no config, auto-discovers the first available (authenticated, image-capable) vision model and writes it to the config. Falls back automatically when the configured model becomes unavailable.
 - Auth, protocol serialization, and retries all go through pi's official pipeline (`ctx.modelRegistry.complete`), supporting `google-generative-ai`, `openai-completions`, and `anthropic-messages` protocols.
 - Image limit is 10 MB (the intersection of the three providers' limits); oversized images are compressed with pi's official `resizeImage` before failing.
+- After the first `describe_image` call of a session (success or failure), the TUI footer shows `vision: provider/model` until the session ends — dim `vision:` prefix, accent model name, and a `!` in error color after a failed call. New sessions start hidden; toggle with `showInFooter`.
 
 ## Configuration
 
@@ -35,18 +36,20 @@ Manual install: drop the `pi-aux-vision/` directory under `~/.pi/agent/extension
   "model": "gemini-2.5-flash",
   "maxOutputTokens": 4096,
   "maxRetries": 2,
-  "maxRetryDelayMs": 5000
+  "maxRetryDelayMs": 5000,
+  "showInFooter": true
 }
 ```
 
 - `maxRetries`: retry count (initial + N attempts; 4xx is not retried, handled by the official pipeline)
 - `maxRetryDelayMs`: backoff ceiling, in milliseconds
+- `showInFooter`: show the `vision: provider/model` status in the TUI footer after the first `describe_image` call of a session (default `true`)
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `/vision status` | Current provider/model, protocol, enabled state |
+| `/vision status` | Current provider/model, protocol, enabled state, footer switch |
 | `/vision set <provider> <model>` | Set a vision model explicitly and enable it, writes to config |
 | `/vision list` | List available (authenticated) image models, mark the current one |
 | `/vision enable` / `/vision disable` | Toggle; when disabled, `describe_image` is hidden from the main model |
@@ -73,7 +76,7 @@ or directly:
 node .test/build.js && node .test/test-run.mjs
 ```
 
-`.test/` bundles the extension modules with mocked pi dependencies via esbuild and covers config read/write, model discovery, `describe_image` success/failure paths, and test-image generation.
+`.test/` bundles the extension modules with mocked pi dependencies via esbuild and covers config read/write, model discovery, `describe_image` success/failure paths, test-image generation, and the footer state machine + wiring.
 
 ## License
 

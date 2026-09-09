@@ -24,6 +24,7 @@
     "index.ts",
     "config.ts",
     "discovery.ts",
+    "footer.ts",
     "vision.ts",
     "ui.ts",
     "test-image.ts",

@@ -44,6 +44,7 @@ export function makeFakeCtx(completeImpl?: (model: FakeModel) => unknown) {
   ];
   const noAuth = new Set<string>(["google/gemini-2.5-flash"]);
   const isAuthed = (m: FakeModel) => !noAuth.has(`${m.provider}/${m.id}`);
+  const statusCalls: { key: string; text: string | undefined }[] = [];
   return {
     cwd: os.tmpdir(),
     signal: undefined,
@@ -61,6 +62,80 @@ export function makeFakeCtx(completeImpl?: (model: FakeModel) => unknown) {
         stopReason: "stop" as const,
         timestamp: Date.now(),
       })),
+    },
+    // footer 接线测试:记录 setStatus 调用;notify/theme 保持可用
+    ui: {
+      setStatus: (key: string, text: string | undefined) => {
+        statusCalls.push({ key, text });
+      },
+      notify: () => {},
+      theme: fakeTheme,
+    },
+    uiStatusCalls: statusCalls,
+  };
+}
+
+// ---- ui/theme mock(接线层上色断言用)----
+export const fakeTheme = {
+  fg: (color: string, text: string) => `[${color}]${text}[/${color}]`,
+  bold: (t: string) => t,
+  dim: (t: string) => t,
+};
+
+// ---- pi-tui / pi-coding-agent 组件桩(仅需可解析,接线测试不会实例化)----
+export class Container {
+  addChild(_c: unknown) {}
+  render(_w: unknown) {}
+  invalidate() {}
+}
+export class DynamicBorder {
+  constructor(_fn?: unknown) {}
+  render(_w: unknown) {}
+  invalidate() {}
+}
+export class SelectList {
+  constructor(_items: unknown[], _height?: number, _opts?: unknown) {}
+  setSelectedIndex(_i: number) {}
+  onSelect: unknown;
+  onCancel: unknown;
+  handleInput(_d: unknown) {}
+  render(_w: unknown) {}
+  invalidate() {}
+}
+export class Text {
+  constructor(_t: string, _x: number, _y: number) {}
+  render(_w: unknown) {}
+  invalidate() {}
+}
+
+// ---- ExtensionAPI 桩:捕获工具/命令注册与事件处理器,供接线测试驱动 ----
+export function makeFakePi() {
+  const tools = new Map<string, unknown>();
+  const commands = new Map<string, unknown>();
+  const events = new Map<string, ((event: unknown, ctx: unknown) => Promise<void> | void)[]>();
+  let activeTools: string[] = [];
+  return {
+    pi: {
+      registerTool: (def: { name: string }) => {
+        tools.set(def.name, def);
+      },
+      registerCommand: (name: string, def: unknown) => {
+        commands.set(name, def);
+      },
+      on: (event: string, cb: (event: unknown, ctx: unknown) => Promise<void> | void) => {
+        const list = events.get(event) ?? [];
+        list.push(cb);
+        events.set(event, list);
+      },
+      getActiveTools: () => activeTools,
+      setActiveTools: (t: string[]) => {
+        activeTools = [...t];
+      },
+    },
+    tool: (name: string) => tools.get(name) as { execute: (...args: unknown[]) => Promise<{ isError?: boolean; content: { text: string }[] }> } | undefined,
+    command: (name: string) => commands.get(name) as { handler: (...args: unknown[]) => Promise<void> | void } | undefined,
+    async fire(event: string, e: unknown, ctx: unknown) {
+      for (const cb of events.get(event) ?? []) await cb(e, ctx);
     },
   };
 }

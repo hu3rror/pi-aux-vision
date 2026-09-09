@@ -4,8 +4,9 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { DEFAULT_CONFIG, loadConfig, saveConfig, type AuxVisionConfig } from "./config";
 import { findConfiguredModel, findFirstVisionModel, formatModelDescription, formatProviderDescription, groupVisionProviders, listVisionModels, resolveVisionCandidates } from "./discovery";
-import { describeImage } from "./vision";
+import { describeImage, type DescribeImageResult } from "./vision";
 import { generateTestImage } from "./test-image";
+import { INITIAL_FOOTER_STATE, footerParts, reduceFooter, type FooterConfig, type FooterEvent, type FooterState } from "./footer";
 
 import { pickFromList } from "./ui";
 
@@ -15,6 +16,39 @@ const TEST_QUESTION = "描述这张测试图:复述图中所有文字,并说明�
 export default function (pi: ExtensionAPI) {
   let toolRegistered = false;
   let initialized = false;
+
+  // ---- footer 状态机接线:状态存于本会话,事件驱动,经 ctx.ui.setStatus 写入 footer ----
+  const FOOTER_KEY = "aux-vision";
+  let footerState: FooterState = INITIAL_FOOTER_STATE;
+
+  function footerCfg(cfg: AuxVisionConfig | null): FooterConfig {
+    return {
+      provider: cfg?.provider ?? "",
+      model: cfg?.model ?? "",
+      enabled: cfg?.enabled ?? DEFAULT_CONFIG.enabled,
+      showInFooter: cfg?.showInFooter ?? DEFAULT_CONFIG.showInFooter,
+    };
+  }
+
+  /** 用当前配置把状态渲染成上色文本写入 footer;无内容则清除。 */
+  function updateFooter(ctx: ExtensionContext, cfg: AuxVisionConfig | null) {
+    const parts = footerParts(footerState, footerCfg(cfg));
+    if (!parts) {
+      ctx.ui.setStatus(FOOTER_KEY, undefined);
+      return;
+    }
+    const theme = ctx.ui.theme;
+    ctx.ui.setStatus(
+      FOOTER_KEY,
+      theme.fg("dim", parts.prefix) + theme.fg("accent", parts.model) + (parts.failed ? theme.fg("error", "!") : ""),
+    );
+  }
+
+  /** 事件点入口:先转移状态,再以当前磁盘配置刷新 footer。 */
+  function applyFooterEvent(event: FooterEvent, ctx: ExtensionContext) {
+    footerState = reduceFooter(footerState, event);
+    updateFooter(ctx, loadConfig());
+  }
 
   /** 差分控制 describe_image 在当前会话的可见性,不动其他工具。 */
   function ensureToolActive(active: boolean) {
@@ -63,33 +97,45 @@ export default function (pi: ExtensionAPI) {
         }),
       }),
       async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-        const cfg = loadConfig();
-        if (!cfg || !cfg.enabled || !cfg.provider || !cfg.model) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "aux-vision 插件未启用。运行 /vision status 查看状态,用 /vision set <provider> <model> 配置视觉模型。",
-              },
-            ],
-            isError: true,
-          };
-        }
-        const model = findConfiguredModel(ctx, cfg.provider, cfg.model);
-        if (!model) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `配置的视觉模型 ${cfg.provider}/${cfg.model} 当前不可用(不存在或未认证)。运行 /vision list 查看可用模型。`,
-              },
-            ],
-            isError: true,
-          };
-        }
-        return describeImage(params, ctx, model, cfg, signal);
+        const result = await runDescribe(params, ctx, signal);
+        // 任何调用(含失败)都算触发:footer 显示模型并保持到会话结束
+        applyFooterEvent({ type: "call", ok: !result.isError }, ctx);
+        return result;
       },
     });
+  }
+
+  /** describe_image 主体:校验配置与模型可用性后走官方管线;供 execute 触发 footer 事件。 */
+  async function runDescribe(
+    params: { image_path: string; question: string },
+    ctx: ExtensionContext,
+    signal: AbortSignal | undefined,
+  ): Promise<DescribeImageResult> {
+    const cfg = loadConfig();
+    if (!cfg || !cfg.enabled || !cfg.provider || !cfg.model) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "aux-vision 插件未启用。运行 /vision status 查看状态,用 /vision set <provider> <model> 配置视觉模型。",
+          },
+        ],
+        isError: true,
+      };
+    }
+    const model = findConfiguredModel(ctx, cfg.provider, cfg.model);
+    if (!model) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `配置的视觉模型 ${cfg.provider}/${cfg.model} 当前不可用(不存在或未认证)。运行 /vision list 查看可用模型。`,
+          },
+        ],
+        isError: true,
+      };
+    }
+    return describeImage(params, ctx, model, cfg, signal);
   }
 
   async function initialize(ctx: ExtensionContext) {
@@ -143,6 +189,8 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.on("session_start", async (_event, ctx) => {
+    // 新会话:footer 回到未触发(不显示);模型变更由 initialize 决定
+    applyFooterEvent({ type: "reset" }, ctx);
     await initialize(ctx);
   });
 
@@ -178,7 +226,7 @@ export default function (pi: ExtensionAPI) {
             ? `协议 ${model.api} | 上下文 ${model.contextWindow} | 输出上限 ${model.maxTokens}`
             : "(模型当前不可用)";
           ctx.ui.notify(
-            `aux-vision: ${cfg.enabled ? "启用" : "已禁用"} | ${cfg.provider}/${cfg.model}\n${detail}`,
+            `aux-vision: ${cfg.enabled ? "启用" : "已禁用"} | ${cfg.provider}/${cfg.model} | footer 显示:${cfg.showInFooter ? "开" : "关"}\n${detail}`,
             cfg.enabled ? "info" : "warn",
           );
           return;
@@ -236,6 +284,7 @@ export default function (pi: ExtensionAPI) {
               return;
             }
             ctx.ui.notify(applySelection(group.provider, model.id), "info");
+            applyFooterEvent({ type: "set" }, ctx);
             return;
           }
           const model = findConfiguredModel(ctx, provider, modelId);
@@ -244,6 +293,7 @@ export default function (pi: ExtensionAPI) {
             return;
           }
           ctx.ui.notify(applySelection(provider, modelId), "info");
+          applyFooterEvent({ type: "set" }, ctx);
           return;
         }
         case "list": {
@@ -277,6 +327,7 @@ export default function (pi: ExtensionAPI) {
             }
           }
           ctx.ui.notify(applySelection(cfg.provider, cfg.model), "info");
+          applyFooterEvent({ type: "enable" }, ctx);
           return;
         }
         case "disable": {
@@ -285,6 +336,7 @@ export default function (pi: ExtensionAPI) {
           saveConfig(fresh);
           ensureToolActive(false);
           ctx.ui.notify("aux-vision: 已禁用,describe_image 工具不再对模型可见。", "info");
+          applyFooterEvent({ type: "disable" }, ctx);
           return;
         }
         case "test": {

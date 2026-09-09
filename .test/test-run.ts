@@ -7,8 +7,9 @@ import { loadConfig, saveConfig, DEFAULT_CONFIG } from "../config";
 import { findConfiguredModel, findFirstVisionModel, formatModelDescription, formatProviderDescription, groupVisionProviders, isVisionModel, listVisionModels, resolveVisionCandidates } from "../discovery";
 import { describeImage } from "../vision";
 import { generateTestImage } from "../test-image";
-import { makeFakeCtx, setTestAgentDir, tmpfile, writePng } from "./mock-pi";
-
+import { INITIAL_FOOTER_STATE, footerParts, footerStatus, reduceFooter, renderFooter } from "../footer";
+import extension from "../index";
+import { makeFakeCtx, makeFakePi, setTestAgentDir, tmpfile, writePng } from "./mock-pi";
 let passed = 0;
 function ok(name: string) {
   passed++;
@@ -24,6 +25,14 @@ function ok(name: string) {
   const loaded = loadConfig();
   assert.deepStrictEqual(loaded, cfg);
   ok("config round-trip");
+  // showInFooter 缺失 → 默认 true(旧配置文件兼容)
+  fs.writeFileSync(path.join(dir, "aux-vision.json"), JSON.stringify({ provider: "google", model: "gemini-2.5-flash" }));
+  assert.strictEqual(loadConfig()?.showInFooter, true);
+  ok("showInFooter missing -> defaults true");
+  // showInFooter: false 往返
+  saveConfig({ ...DEFAULT_CONFIG, provider: "google", model: "gemini-2.5-flash", showInFooter: false });
+  assert.strictEqual(loadConfig()?.showInFooter, false);
+  ok("showInFooter false round-trips");
   // 损坏文件 → null
   fs.writeFileSync(path.join(dir, "aux-vision.json"), "{ not json");
   assert.strictEqual(loadConfig(), null);
@@ -157,6 +166,135 @@ function ok(name: string) {
     "google/gemini-3.1-flash-lite",
   ]);
   ok("resolveVisionCandidates falls back to all when nothing authenticated");
+}
+
+// ---- 9. footer 状态机(纯函数)----
+{
+  const cfg = { provider: "google", model: "gemini-2.5-flash", enabled: true, showInFooter: true };
+  const triggered = reduceFooter(INITIAL_FOOTER_STATE, { type: "call", ok: true });
+  const failed = reduceFooter(INITIAL_FOOTER_STATE, { type: "call", ok: false });
+
+  // 未触发 → 不显示
+  assert.strictEqual(renderFooter(INITIAL_FOOTER_STATE, cfg), undefined);
+  assert.strictEqual(footerStatus(INITIAL_FOOTER_STATE, { type: "reset" }, cfg), undefined);
+  ok("untriggered -> hidden");
+
+  // showInFooter=false → 不显示(即使已触发)
+  assert.strictEqual(renderFooter(triggered, { ...cfg, showInFooter: false }), undefined);
+  ok("showInFooter=false -> hidden");
+
+  // 触发成功 → vision: provider/model
+  assert.strictEqual(
+    footerStatus(INITIAL_FOOTER_STATE, { type: "call", ok: true }, cfg),
+    "vision: google/gemini-2.5-flash",
+  );
+  ok("successful call -> vision: provider/model");
+
+  // 触发失败 → 追加 !
+  assert.strictEqual(
+    footerStatus(INITIAL_FOOTER_STATE, { type: "call", ok: false }, cfg),
+    "vision: google/gemini-2.5-flash!",
+  );
+  ok("failed call -> trailing !");
+
+  // 失败后成功 → 错误标记恢复
+  assert.strictEqual(footerStatus(failed, { type: "call", ok: true }, cfg), "vision: google/gemini-2.5-flash");
+  ok("success after failure clears !");
+
+  // set/enable 刷新模型
+  const newCfg = { provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite", enabled: true, showInFooter: true };
+  assert.strictEqual(footerStatus(triggered, { type: "set" }, newCfg), "vision: sensenova-anthropic/sensenova-6.8-flash-lite");
+  assert.strictEqual(footerStatus(triggered, { type: "enable" }, newCfg), "vision: sensenova-anthropic/sensenova-6.8-flash-lite");
+  ok("set/enable refresh model in footer");
+
+  // disable → 清除(配置 enabled=false 时渲染为空)
+  assert.strictEqual(renderFooter(triggered, { ...cfg, enabled: false }), undefined);
+  ok("disable -> hidden");
+
+  // reset → 回到未触发
+  assert.strictEqual(footerStatus(triggered, { type: "reset" }, cfg), undefined);
+  ok("reset -> untriggered");
+
+  // 未配置模型 → 不显示
+  assert.strictEqual(renderFooter(triggered, { ...cfg, provider: "" }), undefined);
+  ok("no model configured -> hidden");
+
+  // footerParts 供接线层上色(dim prefix + accent model + error !)
+  assert.deepStrictEqual(footerParts(triggered, cfg), {
+    prefix: "vision: ",
+    model: "google/gemini-2.5-flash",
+    failed: false,
+  });
+  assert.strictEqual(footerParts(failed, cfg)?.failed, true);
+  assert.strictEqual(footerParts(INITIAL_FOOTER_STATE, cfg), undefined);
+  ok("footerParts exposes prefix/model/failed for coloring");
+}
+
+// ---- 10. 接线:session_start reset + describe_image execute call → ui.setStatus ----
+{
+  setTestAgentDir(fs.mkdtempSync(path.join(os.tmpdir(), "aux-vision-wire-")));
+  saveConfig({ ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" });
+
+  const fake = makeFakePi();
+  extension(fake.pi as never);
+
+  const ctx = makeFakeCtx();
+  await fake.fire("session_start", {}, ctx);
+
+  // 新会话 → reset → footer 清除
+  assert.deepStrictEqual(ctx.uiStatusCalls, [{ key: "aux-vision", text: undefined }]);
+  ok("session_start resets footer to hidden");
+
+  const tool = fake.tool("describe_image");
+  assert.ok(tool, "describe_image tool registered");
+
+  // 成功调用 → footer 显示上色文本(dim 前缀 + accent 模型名)
+  const res = await tool.execute("1", { image_path: writePng("wire.png"), question: "?" }, undefined, undefined, ctx);
+  assert.strictEqual(res.isError, undefined);
+  const last = ctx.uiStatusCalls.at(-1)!;
+  assert.strictEqual(last.key, "aux-vision");
+  assert.strictEqual(
+    last.text,
+    "[dim]vision: [/dim][accent]sensenova-anthropic/sensenova-6.8-flash-lite[/accent]",
+  );
+  ok("execute success -> footer shows colored vision status");
+
+  // 失败调用 → 追加 error !
+  const bad = await tool.execute("2", { image_path: tmpfile("nope.png"), question: "?" }, undefined, undefined, ctx);
+  assert.strictEqual(bad.isError, true);
+  assert.match(ctx.uiStatusCalls.at(-1)!.text!, /\[error\]!\[\/error\]$/);
+  ok("execute failure -> footer appends error !");
+
+  // 下一次成功调用 → 错误标记恢复(接线层验证)
+  await tool.execute("3", { image_path: writePng("wire-ok.png"), question: "?" }, undefined, undefined, ctx);
+  assert.strictEqual(
+    ctx.uiStatusCalls.at(-1)!.text,
+    "[dim]vision: [/dim][accent]sensenova-anthropic/sensenova-6.8-flash-lite[/accent]",
+  );
+  ok("success after failure restores normal style");
+
+  // /vision set → 刷新模型
+  const cmd = fake.command("vision");
+  assert.ok(cmd, "vision command registered");
+  await cmd.handler("set google gemini-3.1-flash-lite", ctx);
+  assert.strictEqual(
+    ctx.uiStatusCalls.at(-1)!.text,
+    "[dim]vision: [/dim][accent]google/gemini-3.1-flash-lite[/accent]",
+  );
+  ok("/vision set refreshes footer model");
+
+  // /vision disable → 清除
+  await cmd.handler("disable", ctx);
+  assert.strictEqual(ctx.uiStatusCalls.at(-1)!.text, undefined);
+  ok("/vision disable clears footer");
+
+  // /vision enable → 恢复显示(本会话已触发过)
+  await cmd.handler("enable", ctx);
+  assert.strictEqual(
+    ctx.uiStatusCalls.at(-1)!.text,
+    "[dim]vision: [/dim][accent]google/gemini-3.1-flash-lite[/accent]",
+  );
+  ok("/vision enable restores footer after re-enable");
 }
 
 console.log(`\n${passed} tests passed`);

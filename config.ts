@@ -9,6 +9,8 @@ export interface AuxVisionConfig {
   maxOutputTokens: number;
   maxRetries: number;
   maxRetryDelayMs: number;
+  /** footer 常驻显示开关(本会话触发过 describe_image 后显示)。 */
+  showInFooter: boolean;
 }
 
 export const DEFAULT_CONFIG: Omit<AuxVisionConfig, "provider" | "model"> = {
@@ -16,6 +18,7 @@ export const DEFAULT_CONFIG: Omit<AuxVisionConfig, "provider" | "model"> = {
   maxOutputTokens: 4096,
   maxRetries: 2,
   maxRetryDelayMs: 5000,
+  showInFooter: true,
 };
 
 export function configPath(): string {
@@ -35,6 +38,8 @@ export function loadConfig(): AuxVisionConfig | null {
       maxRetries: typeof data.maxRetries === "number" ? data.maxRetries : DEFAULT_CONFIG.maxRetries,
       maxRetryDelayMs:
         typeof data.maxRetryDelayMs === "number" ? data.maxRetryDelayMs : DEFAULT_CONFIG.maxRetryDelayMs,
+      showInFooter:
+        typeof data.showInFooter === "boolean" ? data.showInFooter : DEFAULT_CONFIG.showInFooter,
     };
   } catch {
     return null;

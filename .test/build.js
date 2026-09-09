@@ -39,6 +39,7 @@ await build({
       name: "alias",
       setup(build) {
         build.onResolve({ filter: /^@earendil-works\/pi-coding-agent$/ }, () => ({ path: mock }));
+        build.onResolve({ filter: /^@earendil-works\/pi-tui$/ }, () => ({ path: mock }));
         build.onResolve({ filter: /^typebox$/ }, () => ({ path: mock }));
       },
     },

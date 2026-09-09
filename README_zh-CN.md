@@ -23,6 +23,7 @@ pi -e npm:pi-aux-vision
 - 启动时读取 `~/.pi/agent/aux-vision.json`;无配置则自动发现第一个可用(已认证且支持图像输入)的视觉模型并写入配置;配置的模型失效时自动回退。
 - 认证、协议序列化、重试全部走 pi 官方管线(`ctx.modelRegistry.complete`),支持 google-generative-ai / openai-completions / anthropic-messages 三种协议。
 - 图片上限 10MB(三家服务商限制交集);超限时用 pi 官方 `resizeImage` 自动压缩,压不动才报错。
+- 本会话内第一次调用 `describe_image`(无论成败)后,TUI footer 显示 `vision: provider/model` 并保持到会话结束——dim 的 `vision:` 前缀 + accent 的模型名,调用失败时 `!` 以 error 色追加;新会话恢复不显示,可用 `showInFooter` 关闭。
 
 ## 配置
 
@@ -35,18 +36,20 @@ pi -e npm:pi-aux-vision
   "model": "gemini-2.5-flash",
   "maxOutputTokens": 4096,
   "maxRetries": 2,
-  "maxRetryDelayMs": 5000
+  "maxRetryDelayMs": 5000,
+  "showInFooter": true
 }
 ```
 
 - `maxRetries`:重试次数(初始 + N 次,4xx 不重试,由官方管线处理)
 - `maxRetryDelayMs`:退避上限,单位毫秒
+- `showInFooter`:本会话第一次调用 `describe_image` 后是否在 TUI footer 显示 `vision: provider/model`(默认 `true`)
 
 ## 命令
 
 | 命令 | 说明 |
 |---|---|
-| `/vision status` | 当前 provider/model、协议、启用状态 |
+| `/vision status` | 当前 provider/model、协议、启用状态、footer 开关 |
 | `/vision set <provider> <model>` | 手动指定视觉模型并启用,写入配置 |
 | `/vision list` | 列出可用(已认证)的图像识别模型,标注当前 |
 | `/vision enable` / `/vision disable` | 开关;禁用后 `describe_image` 对主模型不可见 |
@@ -73,7 +76,7 @@ npm test
 node .test/build.js && node .test/test-run.mjs
 ```
 
-`.test/` 用 esbuild 将扩展模块与 pi 依赖的 mock 打包后执行,覆盖配置读写、模型发现、describe_image 成功/失败路径、测试图生成。
+`.test/` 用 esbuild 将扩展模块与 pi 依赖的 mock 打包后执行,覆盖配置读写、模型发现、describe_image 成功/失败路径、测试图生成、footer 状态机与接线。
 
 ## License
 
