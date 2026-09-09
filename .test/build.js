@@ -2,6 +2,7 @@
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 
@@ -23,9 +24,9 @@ if (!esbuildDir) {
 }
 const { build } = require(esbuildDir);
 
-const dir = path.join(process.env.USERPROFILE, ".pi", "agent", "extensions", "aux-vision");
+// 仓库根目录:build.js 位于 <root>/.test/ 下,取上两级。
+const dir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const mock = path.join(dir, ".test", "mock-pi.ts");
-
 await build({
   entryPoints: [path.join(dir, ".test", "test-run.ts")],
   bundle: true,
