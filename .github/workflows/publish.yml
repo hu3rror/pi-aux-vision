@@ -1,11 +1,9 @@
 # 发布流水线:推送 v* 标签后,把当前版本自动 staging 到 npm 暂存区。
 # 不直接发布 —— 由维护者本地执行 `npm stage approve <stage-id>`(2FA)完成最终发布。
 #
-# 前置条件(维护者一次性设置,详见 docs):
+# 前置条件(维护者已在 npmjs.com 配置,勿删):
+# - Trusted Publisher 绑定本仓库与 workflow 文件 `publish.yml`(OIDC 认证,无需任何 token)
 # - npm 账号开启 2FA(`npm stage approve`/`reject` 必需)
-# - 创建 Granular Access Token(不带 bypass 2FA)并添加为仓库 secret `NPM_TOKEN`
-# - 建议包访问权限设为 "Require two-factor authentication and disallow tokens"
-# - 首次跑 `npm stage publish` 若因 provenance 报错,去掉 `--provenance` 即可
 name: publish
 
 on:
@@ -48,9 +46,8 @@ jobs:
           fi
 
       - name: Stage package on npm registry
+        # Trusted Publishing(OIDC)自动认证并生成 provenance,无需 NODE_AUTH_TOKEN
         run: npm stage publish --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: List staged versions (note the stage-id for approval)
         run: npm stage list --json
