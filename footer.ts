@@ -5,8 +5,11 @@
  * 事件:reset(新会话)、call(describe_image 调用完成,含失败)、set/enable(模型变更)、disable(禁用)。
  * 输出:`vision: provider/model`(最近一次 call 失败追加 `!`)或 undefined(不显示)。
  *
- * 接线层(index.ts)负责:持有状态、在事件点调用 reduceFooter、用 ctx.ui.theme 上色后写 footer。
+ * 接线层(index.ts)负责:持有状态、在事件点调用 reduceFooter、把磁盘配置投影为 FooterConfig、
+ * 用 ctx.ui.theme 经 colorFooter 上色后写 footer。
  */
+
+import { DEFAULT_CONFIG, type AuxVisionConfig } from "./config";
 
 export interface FooterState {
   /** 本会话是否已触发过 describe_image 调用。 */
@@ -73,4 +76,28 @@ export function renderFooter(state: FooterState, cfg: FooterConfig): string | un
 /** 事件 + 状态 + 配置 → 要显示的纯文本(无颜色),reduce + render 的组合入口。 */
 export function footerStatus(state: FooterState, event: FooterEvent, cfg: FooterConfig): string | undefined {
   return renderFooter(reduceFooter(state, event), cfg);
+}
+
+/** 上色窄接口:纯函数层不依赖 TUI/ANSI,只约定接线层传入的 theme 需提供 fg。 */
+export interface FooterTheme {
+  fg(color: "dim" | "accent" | "error", text: string): string;
+}
+
+/** FooterParts → 上色文本:dim 前缀 + accent 模型名 + 失败时追加 error 色 `!`。纯函数,theme 由调用方传入。 */
+export function colorFooter(parts: FooterParts, theme: FooterTheme): string {
+  return (
+    theme.fg("dim", parts.prefix) +
+    theme.fg("accent", parts.model) +
+    (parts.failed ? theme.fg("error", "!") : "")
+  );
+}
+
+/** 磁盘配置(AuxVisionConfig | null)→ FooterConfig;缺省值(空模型、DEFAULT_CONFIG 开关)归此一处。 */
+export function projectFooterConfig(cfg: AuxVisionConfig | null): FooterConfig {
+  return {
+    provider: cfg?.provider ?? "",
+    model: cfg?.model ?? "",
+    enabled: cfg?.enabled ?? DEFAULT_CONFIG.enabled,
+    showInFooter: cfg?.showInFooter ?? DEFAULT_CONFIG.showInFooter,
+  };
 }

@@ -3,13 +3,13 @@ import * as assert from "node:assert";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { loadConfig, saveConfig, DEFAULT_CONFIG } from "../config";
+import { loadConfig, saveConfig, DEFAULT_CONFIG, type AuxVisionConfig } from "../config";
 import { findConfiguredModel, findFirstVisionModel, formatModelDescription, formatProviderDescription, groupVisionProviders, isVisionModel, listVisionModels, resolveVisionCandidates } from "../discovery";
 import { describeImage } from "../vision";
 import { generateTestImage } from "../test-image";
-import { INITIAL_FOOTER_STATE, footerParts, footerStatus, reduceFooter, renderFooter } from "../footer";
+import { INITIAL_FOOTER_STATE, colorFooter, footerParts, footerStatus, projectFooterConfig, reduceFooter, renderFooter } from "../footer";
 import extension from "../index";
-import { makeFakeCtx, makeFakePi, setTestAgentDir, tmpfile, writePng } from "./mock-pi";
+import { fakeTheme, makeFakeCtx, makeFakePi, setTestAgentDir, tmpfile, writePng } from "./mock-pi";
 let passed = 0;
 function ok(name: string) {
   passed++;
@@ -230,6 +230,41 @@ function ok(name: string) {
   ok("footerParts exposes prefix/model/failed for coloring");
 }
 
+// ---- 9b. footer 纯函数:colorFooter 与 projectFooterConfig ----
+{
+  // colorFooter 成功:dim 前缀 + accent 模型名,无 !
+  assert.strictEqual(
+    colorFooter({ prefix: "vision: ", model: "google/gemini-2.5-flash", failed: false }, fakeTheme),
+    "[dim]vision: [/dim][accent]google/gemini-2.5-flash[/accent]",
+  );
+  ok("colorFooter success -> dim prefix + accent model");
+
+  // colorFooter 失败:追加 error 色 !
+  assert.strictEqual(
+    colorFooter({ prefix: "vision: ", model: "google/gemini-2.5-flash", failed: true }, fakeTheme),
+    "[dim]vision: [/dim][accent]google/gemini-2.5-flash[/accent][error]![/error]",
+  );
+  ok("colorFooter failure -> appends error !");
+
+  // projectFooterConfig null → 全默认(空模型 + DEFAULT_CONFIG 开关)
+  assert.deepStrictEqual(projectFooterConfig(null), {
+    provider: "",
+    model: "",
+    enabled: DEFAULT_CONFIG.enabled,
+    showInFooter: DEFAULT_CONFIG.showInFooter,
+  });
+  ok("projectFooterConfig null -> defaults");
+
+  // projectFooterConfig 完整配置 → 原样投影
+  const fullCfg: AuxVisionConfig = { ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" };
+  assert.deepStrictEqual(projectFooterConfig(fullCfg), {
+    provider: "sensenova-anthropic",
+    model: "sensenova-6.8-flash-lite",
+    enabled: DEFAULT_CONFIG.enabled,
+    showInFooter: DEFAULT_CONFIG.showInFooter,
+  });
+  ok("projectFooterConfig full config -> projected");
+}
 // ---- 10. 接线:session_start reset + describe_image execute call → ui.setStatus ----
 {
   setTestAgentDir(fs.mkdtempSync(path.join(os.tmpdir(), "aux-vision-wire-")));
