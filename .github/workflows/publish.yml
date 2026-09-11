@@ -49,5 +49,3 @@ jobs:
         # Trusted Publishing(OIDC)自动认证并生成 provenance,无需 NODE_AUTH_TOKEN
         run: npm stage publish --provenance
 
-      - name: List staged versions (note the stage-id for approval)
-        run: npm stage list --json
