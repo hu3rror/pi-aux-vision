@@ -1,16 +1,18 @@
 // 打包测试:把扩展模块与 pi 依赖的 mock 打成单个可执行 mjs
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 
 // esbuild 随 pi 安装;候选探测(可用 PI_ESBUILD_DIR 覆盖)。
+// 用 os.homedir() 而非 USERPROFILE,避免非 Windows 上 path.join(undefined, ...) 抛错。
 const esbuildCandidates = [
   process.env.PI_ESBUILD_DIR,
   path.join(
-    process.env.USERPROFILE, "AppData", "Local", "mise", "installs", "node",
+    homedir(), "AppData", "Local", "mise", "installs", "node",
     process.versions.node, "node_modules", "@earendil-works", "pi-coding-agent", "node_modules", "esbuild",
   ),
 ];

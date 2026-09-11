@@ -1,0 +1,56 @@
+# 发布流水线:推送 v* 标签后,把当前版本自动 staging 到 npm 暂存区。
+# 不直接发布 —— 由维护者本地执行 `npm stage approve <stage-id>`(2FA)完成最终发布。
+#
+# 前置条件(维护者一次性设置,详见 docs):
+# - npm 账号开启 2FA(`npm stage approve`/`reject` 必需)
+# - 创建 Granular Access Token(不带 bypass 2FA)并添加为仓库 secret `NPM_TOKEN`
+# - 建议包访问权限设为 "Require two-factor authentication and disallow tokens"
+# - 首次跑 `npm stage publish` 若因 provenance 报错,去掉 `--provenance` 即可
+name: publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write # npm --provenance(供应链来源证明)需要 OIDC token
+
+jobs:
+  stage:
+    name: Stage npm package
+    runs-on: windows-latest # 测试依赖 Windows PowerShell + System.Drawing(与开发环境一致)
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run tests
+        run: npm test
+        env:
+          PI_ESBUILD_DIR: ${{ github.workspace }}/node_modules/esbuild
+
+      - name: Verify tag matches package.json version
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::tag v${tag} does not match package.json version ${version}"
+            exit 1
+          fi
+
+      - name: Stage package on npm registry
+        run: npm stage publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: List staged versions (note the stage-id for approval)
+        run: npm stage list --json
