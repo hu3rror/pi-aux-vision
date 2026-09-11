@@ -25,6 +25,7 @@
     "config.ts",
     "discovery.ts",
     "footer.ts",
+    "footer-controller.ts",
     "vision.ts",
     "ui.ts",
     "test-image.ts",

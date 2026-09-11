@@ -5,8 +5,8 @@
  * 事件:reset(新会话)、call(describe_image 调用完成,含失败)、set/enable(模型变更)、disable(禁用)。
  * 输出:`vision: provider/model`(最近一次 call 失败追加 `!`)或 undefined(不显示)。
  *
- * 接线层(index.ts)负责:持有状态、在事件点调用 reduceFooter、把磁盘配置投影为 FooterConfig、
- * 用 ctx.ui.theme 经 colorFooter 上色后写 footer。
+ * 接线层(footer-controller.ts)负责:持有状态、在事件点调用 reduceFooter、把磁盘配置投影为 FooterConfig、
+ * 用 ui.theme 经 colorFooter 上色后写 footer。
  */
 
 import { DEFAULT_CONFIG, type AuxVisionConfig } from "./config";

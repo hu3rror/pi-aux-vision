@@ -6,7 +6,7 @@ import { DEFAULT_CONFIG, loadConfig, saveConfig, type AuxVisionConfig } from "./
 import { findConfiguredModel, findFirstVisionModel, formatModelDescription, formatProviderDescription, groupVisionProviders, listVisionModels, resolveVisionCandidates } from "./discovery";
 import { describeImage, type DescribeImageResult } from "./vision";
 import { generateTestImage } from "./test-image";
-import { INITIAL_FOOTER_STATE, footerParts, reduceFooter, type FooterConfig, type FooterEvent, type FooterState } from "./footer";
+import { createFooterController } from "./footer-controller";
 
 import { pickFromList } from "./ui";
 
@@ -17,38 +17,8 @@ export default function (pi: ExtensionAPI) {
   let toolRegistered = false;
   let initialized = false;
 
-  // ---- footer 状态机接线:状态存于本会话,事件驱动,经 ctx.ui.setStatus 写入 footer ----
-  const FOOTER_KEY = "aux-vision";
-  let footerState: FooterState = INITIAL_FOOTER_STATE;
-
-  function footerCfg(cfg: AuxVisionConfig | null): FooterConfig {
-    return {
-      provider: cfg?.provider ?? "",
-      model: cfg?.model ?? "",
-      enabled: cfg?.enabled ?? DEFAULT_CONFIG.enabled,
-      showInFooter: cfg?.showInFooter ?? DEFAULT_CONFIG.showInFooter,
-    };
-  }
-
-  /** 用当前配置把状态渲染成上色文本写入 footer;无内容则清除。 */
-  function updateFooter(ctx: ExtensionContext, cfg: AuxVisionConfig | null) {
-    const parts = footerParts(footerState, footerCfg(cfg));
-    if (!parts) {
-      ctx.ui.setStatus(FOOTER_KEY, undefined);
-      return;
-    }
-    const theme = ctx.ui.theme;
-    ctx.ui.setStatus(
-      FOOTER_KEY,
-      theme.fg("dim", parts.prefix) + theme.fg("accent", parts.model) + (parts.failed ? theme.fg("error", "!") : ""),
-    );
-  }
-
-  /** 事件点入口:先转移状态,再以当前磁盘配置刷新 footer。 */
-  function applyFooterEvent(event: FooterEvent, ctx: ExtensionContext) {
-    footerState = reduceFooter(footerState, event);
-    updateFooter(ctx, loadConfig());
-  }
+  // footer controller:状态与 footer key 收在闭包,事件点一行转发
+  const footer = createFooterController();
 
   /** 差分控制 describe_image 在当前会话的可见性,不动其他工具。 */
   function ensureToolActive(active: boolean) {
@@ -99,7 +69,7 @@ export default function (pi: ExtensionAPI) {
       async execute(_toolCallId, params, signal, _onUpdate, ctx) {
         const result = await runDescribe(params, ctx, signal);
         // 任何调用(含失败)都算触发:footer 显示模型并保持到会话结束
-        applyFooterEvent({ type: "call", ok: !result.isError }, ctx);
+        footer.on({ type: "call", ok: !result.isError }, ctx.ui);
         return result;
       },
     });
@@ -190,7 +160,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     // 新会话:footer 回到未触发(不显示);模型变更由 initialize 决定
-    applyFooterEvent({ type: "reset" }, ctx);
+    footer.on({ type: "reset" }, ctx.ui);
     await initialize(ctx);
   });
 
@@ -284,7 +254,7 @@ export default function (pi: ExtensionAPI) {
               return;
             }
             ctx.ui.notify(applySelection(group.provider, model.id), "info");
-            applyFooterEvent({ type: "set" }, ctx);
+            footer.on({ type: "set" }, ctx.ui);
             return;
           }
           const model = findConfiguredModel(ctx, provider, modelId);
@@ -293,7 +263,7 @@ export default function (pi: ExtensionAPI) {
             return;
           }
           ctx.ui.notify(applySelection(provider, modelId), "info");
-          applyFooterEvent({ type: "set" }, ctx);
+          footer.on({ type: "set" }, ctx.ui);
           return;
         }
         case "list": {
@@ -327,7 +297,7 @@ export default function (pi: ExtensionAPI) {
             }
           }
           ctx.ui.notify(applySelection(cfg.provider, cfg.model), "info");
-          applyFooterEvent({ type: "enable" }, ctx);
+          footer.on({ type: "enable" }, ctx.ui);
           return;
         }
         case "disable": {
@@ -336,7 +306,7 @@ export default function (pi: ExtensionAPI) {
           saveConfig(fresh);
           ensureToolActive(false);
           ctx.ui.notify("aux-vision: 已禁用,describe_image 工具不再对模型可见。", "info");
-          applyFooterEvent({ type: "disable" }, ctx);
+          footer.on({ type: "disable" }, ctx.ui);
           return;
         }
         case "test": {
@@ -360,7 +330,7 @@ export default function (pi: ExtensionAPI) {
             ctx.signal,
           );
           // /vision test 也是本会话内实际调用视觉模型:与 execute 一致,成功/失败都算触发
-          applyFooterEvent({ type: "call", ok: !result.isError }, ctx);
+          footer.on({ type: "call", ok: !result.isError }, ctx.ui);
           if (result.isError) {
             ctx.ui.notify(`aux-vision 测试失败:${result.content[0].text}`, "error");
             return;

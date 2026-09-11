@@ -8,6 +8,7 @@ import { findConfiguredModel, findFirstVisionModel, formatModelDescription, form
 import { describeImage } from "../vision";
 import { generateTestImage } from "../test-image";
 import { INITIAL_FOOTER_STATE, colorFooter, footerParts, footerStatus, projectFooterConfig, reduceFooter, renderFooter } from "../footer";
+import { createFooterController } from "../footer-controller";
 import extension from "../index";
 import { fakeTheme, makeFakeCtx, makeFakePi, setTestAgentDir, tmpfile, writePng } from "./mock-pi";
 let passed = 0;
@@ -265,6 +266,62 @@ function ok(name: string) {
   });
   ok("projectFooterConfig full config -> projected");
 }
+// ---- 9c. footer controller:闭包状态 + 每次事件重读配置 + key 归 controller ----
+{
+  setTestAgentDir(fs.mkdtempSync(path.join(os.tmpdir(), "aux-vision-ctrl-")));
+  const calls: { key: string; text: string | undefined }[] = [];
+  const ui = {
+    setStatus: (key: string, text: string | undefined) => {
+      calls.push({ key, text });
+    },
+    theme: fakeTheme,
+  };
+  const controller = createFooterController();
+
+  // 未触发 → reset → 清除(key 由 controller 内部持有)
+  controller.on({ type: "reset" }, ui);
+  assert.deepStrictEqual(calls, [{ key: "aux-vision", text: undefined }]);
+  ok("controller reset clears footer with owned key");
+
+  // call 成功 → 上色文本
+  saveConfig({ ...DEFAULT_CONFIG, provider: "google", model: "gemini-2.5-flash" });
+  controller.on({ type: "call", ok: true }, ui);
+  assert.strictEqual(
+    calls.at(-1)!.text,
+    "[dim]vision: [/dim][accent]google/gemini-2.5-flash[/accent]",
+  );
+  ok("controller call success -> colored text");
+
+  // 每次事件重读磁盘配置:改配置 → set → footer 显示新模型
+  saveConfig({ ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" });
+  controller.on({ type: "set" }, ui);
+  assert.strictEqual(
+    calls.at(-1)!.text,
+    "[dim]vision: [/dim][accent]sensenova-anthropic/sensenova-6.8-flash-lite[/accent]",
+  );
+  ok("controller re-reads config on each event (set)");
+
+  // disable(配置 enabled=false)→ 清除
+  saveConfig({ ...DEFAULT_CONFIG, provider: "google", model: "gemini-2.5-flash", enabled: false });
+  controller.on({ type: "disable" }, ui);
+  assert.strictEqual(calls.at(-1)!.text, undefined);
+  ok("controller disable clears footer");
+
+  // enable → 恢复(会话内已触发过)
+  saveConfig({ ...DEFAULT_CONFIG, provider: "google", model: "gemini-2.5-flash" });
+  controller.on({ type: "enable" }, ui);
+  assert.strictEqual(
+    calls.at(-1)!.text,
+    "[dim]vision: [/dim][accent]google/gemini-2.5-flash[/accent]",
+  );
+  ok("controller enable restores footer");
+
+  // 失败 call → 追加 error !
+  controller.on({ type: "call", ok: false }, ui);
+  assert.match(calls.at(-1)!.text!, /\[error\]!\[\/error\]$/);
+  ok("controller failed call appends error !");
+}
+
 // ---- 10. 接线:session_start reset + describe_image execute call → ui.setStatus ----
 {
   setTestAgentDir(fs.mkdtempSync(path.join(os.tmpdir(), "aux-vision-wire-")));
