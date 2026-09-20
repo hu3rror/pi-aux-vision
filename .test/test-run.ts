@@ -79,7 +79,10 @@ function ok(name: string) {
   const model = findConfiguredModel(ctx, cfg.provider, cfg.model)!;
   const png = writePng("aux-vision-test.png");
   const res = await describeImage({ image_path: png, question: "图中是什么?" }, ctx, model, cfg, undefined);
-  assert.strictEqual(res.isError, undefined);
+  // Tool result contract (ADR-0001): success details carry model/usage, no error marker.
+  assert.ok(!("error" in res.details), "success result has no error marker");
+  assert.strictEqual(res.details.model, "sensenova-anthropic/sensenova-6.8-flash-lite");
+  assert.strictEqual(res.details.usage.totalTokens, 30);
   assert.match(res.content[0].text, /mock-answer/);
   ok("describeImage success path");
 }
@@ -90,20 +93,40 @@ function ok(name: string) {
   const cfg = { ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" };
   const model = findConfiguredModel(ctx, cfg.provider, cfg.model)!;
   const missing = await describeImage({ image_path: tmpfile("nope.png"), question: "?" }, ctx, model, cfg, undefined);
-  assert.strictEqual(missing.isError, true);
+  assert.ok("error" in missing.details, "missing file carries error marker");
+  assert.match(missing.details.error, /不存在/);
   assert.match(missing.content[0].text, /不存在/);
   ok("missing file -> error");
   const doc = tmpfile("doc.txt");
   fs.writeFileSync(doc, "hello");
   const badType = await describeImage({ image_path: doc, question: "?" }, ctx, model, cfg, undefined);
+  assert.ok("error" in badType.details);
   assert.match(badType.content[0].text, /不支持的图片格式/);
   ok("unsupported format -> error");
   const boom = await describeImage({ image_path: writePng("boom.png"), question: "?" }, makeFakeCtx(async () => {
     throw new Error("401 unauthorized");
   }), model, cfg, undefined);
-  assert.strictEqual(boom.isError, true);
+  assert.ok("error" in boom.details);
+  assert.match(boom.details.error, /401/);
   assert.match(boom.content[0].text, /401/);
   ok("complete throw -> error passthrough");
+}
+
+// ---- 5b. 工具结果契约(ADR-0001):details.error 判别,结果不再携带 isError 字段 ----
+{
+  const ctx = makeFakeCtx();
+  const cfg = { ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" };
+  const model = findConfiguredModel(ctx, cfg.provider, cfg.model)!;
+  const okRes = await describeImage({ image_path: writePng("contract-ok.png"), question: "?" }, ctx, model, cfg, undefined);
+  assert.ok(!("error" in okRes.details), "success result carries no error marker");
+  assert.strictEqual(okRes.details.model, "sensenova-anthropic/sensenova-6.8-flash-lite");
+  assert.strictEqual(okRes.details.usage.totalTokens, 30);
+  assert.ok(!("isError" in okRes), "success result carries no isError field (ADR-0001)");
+  const failRes = await describeImage({ image_path: tmpfile("contract-nope.png"), question: "?" }, ctx, model, cfg, undefined);
+  assert.ok("error" in failRes.details, "failure result carries error marker");
+  assert.match(failRes.details.error, /不存在/);
+  assert.ok(!("isError" in failRes), "failure result carries no isError field (ADR-0001)");
+  ok("tool result contract: details.error discriminates, no isError field");
 }
 
 // ---- 6. 测试图生成(真实 PowerShell) ----
@@ -342,7 +365,7 @@ function ok(name: string) {
 
   // 成功调用 → footer 显示上色文本(dim 前缀 + accent 模型名)
   const res = await tool.execute("1", { image_path: writePng("wire.png"), question: "?" }, undefined, undefined, ctx);
-  assert.strictEqual(res.isError, undefined);
+  assert.ok(!("error" in res.details), "success result has no error marker");
   const last = ctx.uiStatusCalls.at(-1)!;
   assert.strictEqual(last.key, "aux-vision");
   assert.strictEqual(
@@ -353,7 +376,7 @@ function ok(name: string) {
 
   // 失败调用 → 追加 error !
   const bad = await tool.execute("2", { image_path: tmpfile("nope.png"), question: "?" }, undefined, undefined, ctx);
-  assert.strictEqual(bad.isError, true);
+  assert.ok("error" in bad.details);
   assert.match(ctx.uiStatusCalls.at(-1)!.text!, /\[error\]!\[\/error\]$/);
   ok("execute failure -> footer appends error !");
 

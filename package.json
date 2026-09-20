@@ -44,9 +44,15 @@
     "typebox": "*"
   },
   "devDependencies": {
-    "esbuild": "^0.21.0"
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "esbuild": "^0.21.0",
+    "typebox": "*",
+    "typescript": "^7.0.2"
   },
   "scripts": {
+    "typecheck": "tsc --noEmit",
     "test": "node .test/build.js && node .test/test-run.mjs"
   }
 }

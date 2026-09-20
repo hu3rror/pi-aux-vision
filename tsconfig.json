@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": [],
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "index.ts",
+    "config.ts",
+    "discovery.ts",
+    "footer.ts",
+    "footer-controller.ts",
+    "ui.ts",
+    "vision.ts",
+    "test-image.ts"
+  ]
+}

@@ -3,15 +3,15 @@ import { Container, type SelectItem, SelectList, Text } from "@earendil-works/pi
 
 /**
  * SelectList 封装:初始焦点定位到 initialIndex,支持 description 与滚动提示。
- * 返回选中项的 value;取消返回 undefined。
+ * 返回选中项的 value;取消返回 null。
  */
 export async function pickFromList(
   ctx: ExtensionCommandContext,
   title: string,
   items: SelectItem[],
   initialIndex: number,
-): Promise<string | undefined> {
-  if (items.length === 0) return undefined;
+): Promise<string | null> {
+  if (items.length === 0) return null;
   return ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
     const container = new Container();
     container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));

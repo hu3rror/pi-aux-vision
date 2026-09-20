@@ -35,6 +35,12 @@ export interface FakeModel {
   maxTokens: number;
 }
 
+// Tool result contract (ADR-0001): success { model, usage }, failure { error }.
+export interface MockToolResult {
+  content: { type: "text"; text: string }[];
+  details: { model: string; usage: { totalTokens: number } } | { error: string };
+}
+
 export function makeFakeCtx(completeImpl?: (model: FakeModel) => unknown) {
   const models: FakeModel[] = [
     { provider: "sensenova-anthropic", id: "sensenova-6.8-flash-lite", api: "anthropic-messages", input: ["text", "image"], contextWindow: 262144, maxTokens: 65536 },
@@ -61,6 +67,14 @@ export function makeFakeCtx(completeImpl?: (model: FakeModel) => unknown) {
         model: "mock",
         stopReason: "stop" as const,
         timestamp: Date.now(),
+        usage: {
+          input: 10,
+          output: 20,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 30,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
       })),
     },
     // footer 接线测试:记录 setStatus 调用;notify/theme 保持可用
@@ -132,7 +146,7 @@ export function makeFakePi() {
         activeTools = [...t];
       },
     },
-    tool: (name: string) => tools.get(name) as { execute: (...args: unknown[]) => Promise<{ isError?: boolean; content: { text: string }[] }> } | undefined,
+    tool: (name: string) => tools.get(name) as { execute: (...args: unknown[]) => Promise<MockToolResult> } | undefined,
     command: (name: string) => commands.get(name) as { handler: (...args: unknown[]) => Promise<void> | void } | undefined,
     async fire(event: string, e: unknown, ctx: unknown) {
       for (const cb of events.get(event) ?? []) await cb(e, ctx);

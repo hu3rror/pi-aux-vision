@@ -25,6 +25,10 @@ Manual install: drop the `pi-aux-vision/` directory under `~/.pi/agent/extension
 - Image limit is 10 MB (the intersection of the three providers' limits); oversized images are compressed with pi's official `resizeImage` before failing.
 - After the first `describe_image` call or `/vision test` of a session (success or failure), the TUI footer shows `vision: provider/model` until the session ends — dim `vision:` prefix, accent model name, and a `!` in error color after a failed call. New sessions start hidden; toggle with `showInFooter`.
 
+## Compatibility
+
+Verified against pi `0.86.0` (2026-09-19). The peer dependency range stays `"*"`; the source type-checks against the current SDK via `npm run typecheck`.
+
 ## Configuration
 
 `~/.pi/agent/aux-vision.json`:
@@ -75,6 +79,8 @@ or directly:
 ```bash
 node .test/build.js && node .test/test-run.mjs
 ```
+
+Type compatibility against the current pi SDK is verified with `npm run typecheck`.
 
 `.test/` bundles the extension modules with mocked pi dependencies via esbuild and covers config read/write, model discovery, `describe_image` success/failure paths, test-image generation, and the footer state machine + wiring.
 

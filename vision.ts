@@ -4,7 +4,7 @@ import {
   resizeImage,
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AssistantMessage, Model, TextContent } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Model, TextContent, Usage } from "@earendil-works/pi-ai";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AuxVisionConfig } from "./config";
@@ -17,14 +17,21 @@ const SYSTEM_PROMPT =
   "Respond in the same language as the user's question. If the image contains text, code, or error messages, " +
   "transcribe them accurately. Be concise but complete — include exact values, coordinates, and quoted text where relevant.";
 
+// Tool result contract (ADR-0001): success carries { model, usage }, failure { error }.
+// Expected failures are returned, not thrown, so the transcript isError stays false.
 export type DescribeImageResult =
-  | { content: { type: "text"; text: string }[]; isError: true }
-  | { content: { type: "text"; text: string }[]; details: Record<string, unknown> };
+  | { content: { type: "text"; text: string }[]; details: { model: string; usage: Usage } }
+  | { content: { type: "text"; text: string }[]; details: { error: string } };
 
-function errorResult(text: string): { content: { type: "text"; text: string }[]; isError: true } {
+/** Narrow a describe_image result to its expected-failure variant. */
+export function isErrorResult(r: DescribeImageResult): r is Extract<DescribeImageResult, { details: { error: string } }> {
+  return "error" in r.details;
+}
+
+function errorResult(text: string): { content: { type: "text"; text: string }[]; details: { error: string } } {
   return {
     content: [{ type: "text" as const, text }],
-    isError: true as const,
+    details: { error: text },
   };
 }
 
@@ -35,7 +42,7 @@ function errorResult(text: string): { content: { type: "text"; text: string }[];
 export async function describeImage(
   params: { image_path: string; question: string },
   ctx: ExtensionContext,
-  model: Model,
+  model: Model<Api>,
   cfg: AuxVisionConfig,
   signal: AbortSignal | undefined,
 ): Promise<DescribeImageResult> {

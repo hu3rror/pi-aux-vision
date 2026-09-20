@@ -4,7 +4,7 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { DEFAULT_CONFIG, loadConfig, saveConfig, type AuxVisionConfig } from "./config";
 import { findConfiguredModel, findFirstVisionModel, formatModelDescription, formatProviderDescription, groupVisionProviders, listVisionModels, resolveVisionCandidates } from "./discovery";
-import { describeImage, type DescribeImageResult } from "./vision";
+import { describeImage, isErrorResult, type DescribeImageResult } from "./vision";
 import { generateTestImage } from "./test-image";
 import { createFooterController } from "./footer-controller";
 
@@ -69,7 +69,7 @@ export default function (pi: ExtensionAPI) {
       async execute(_toolCallId, params, signal, _onUpdate, ctx) {
         const result = await runDescribe(params, ctx, signal);
         // 任何调用(含失败)都算触发:footer 显示模型并保持到会话结束
-        footer.on({ type: "call", ok: !result.isError }, ctx.ui);
+        footer.on({ type: "call", ok: !isErrorResult(result) }, ctx.ui);
         return result;
       },
     });
@@ -83,26 +83,19 @@ export default function (pi: ExtensionAPI) {
   ): Promise<DescribeImageResult> {
     const cfg = loadConfig();
     if (!cfg || !cfg.enabled || !cfg.provider || !cfg.model) {
+      const text =
+        "aux-vision 插件未启用。运行 /vision status 查看状态,用 /vision set <provider> <model> 配置视觉模型。";
       return {
-        content: [
-          {
-            type: "text",
-            text: "aux-vision 插件未启用。运行 /vision status 查看状态,用 /vision set <provider> <model> 配置视觉模型。",
-          },
-        ],
-        isError: true,
+        content: [{ type: "text", text }],
+        details: { error: text },
       };
     }
     const model = findConfiguredModel(ctx, cfg.provider, cfg.model);
     if (!model) {
+      const text = `配置的视觉模型 ${cfg.provider}/${cfg.model} 当前不可用(不存在或未认证)。运行 /vision list 查看可用模型。`;
       return {
-        content: [
-          {
-            type: "text",
-            text: `配置的视觉模型 ${cfg.provider}/${cfg.model} 当前不可用(不存在或未认证)。运行 /vision list 查看可用模型。`,
-          },
-        ],
-        isError: true,
+        content: [{ type: "text", text }],
+        details: { error: text },
       };
     }
     return describeImage(params, ctx, model, cfg, signal);
@@ -129,12 +122,12 @@ export default function (pi: ExtensionAPI) {
         enableTool();
         ctx.ui.notify(
           `aux-vision: 配置的模型 ${cfg!.provider}/${cfg!.model} 不可用,已回退至 ${fallback.provider}/${fallback.id} 并写入配置。`,
-          "warn",
+          "warning",
         );
       } else {
         ctx.ui.notify(
           "aux-vision: 配置的模型不可用,且当前没有其他可用的图像识别模型,插件未启用。",
-          "warn",
+          "warning",
         );
       }
       return;
@@ -153,7 +146,7 @@ export default function (pi: ExtensionAPI) {
     } else {
       ctx.ui.notify(
         "aux-vision: 未检测到可用的图像识别模型,插件未启用。用 /vision set <provider> <model> 配置。",
-        "warn",
+        "warning",
       );
     }
   }
@@ -188,7 +181,7 @@ export default function (pi: ExtensionAPI) {
         case "status": {
           const cfg = loadConfig();
           if (!cfg || !cfg.provider || !cfg.model) {
-            ctx.ui.notify("aux-vision: 未配置视觉模型,插件未启用。", "warn");
+            ctx.ui.notify("aux-vision: 未配置视觉模型,插件未启用。", "warning");
             return;
           }
           const model = findConfiguredModel(ctx, cfg.provider, cfg.model);
@@ -197,7 +190,7 @@ export default function (pi: ExtensionAPI) {
             : "(模型当前不可用)";
           ctx.ui.notify(
             `aux-vision: ${cfg.enabled ? "启用" : "已禁用"} | ${cfg.provider}/${cfg.model} | footer 显示:${cfg.showInFooter ? "开" : "关"}\n${detail}`,
-            cfg.enabled ? "info" : "warn",
+            cfg.enabled ? "info" : "warning",
           );
           return;
         }
@@ -207,7 +200,7 @@ export default function (pi: ExtensionAPI) {
           if (!provider || !modelId) {
             // 交互式选择:provider → model,行为对齐 /login
             if (!ctx.hasUI) {
-              ctx.ui.notify("用法:/vision set <provider> <model>,例如 /vision set google gemini-2.5-flash。", "warn");
+              ctx.ui.notify("用法:/vision set <provider> <model>,例如 /vision set google gemini-2.5-flash。", "warning");
               return;
             }
             // 候选:已认证优先;无已认证才退全量(避免内置目录 30+ provider 铺满选择器)
@@ -216,7 +209,7 @@ export default function (pi: ExtensionAPI) {
               ctx.modelRegistry.getAll(),
             );
             if (candidates.length === 0) {
-              ctx.ui.notify("当前没有任何支持图像输入的模型(未注册或未认证)。", "warn");
+              ctx.ui.notify("当前没有任何支持图像输入的模型(未注册或未认证)。", "warning");
               return;
             }
             const cfg = loadConfig();
@@ -249,7 +242,7 @@ export default function (pi: ExtensionAPI) {
             const model = group.models.find((m) => m.id === pickedModel)!;
             if (!ctx.modelRegistry.hasConfiguredAuth(model)) {
               ctx.ui.notify(
-                `模型 ${group.provider}/${model.id} 尚未认证。请先执行 /login ${group.provider} 完成认证,再重新 /vision set。`,"warn",
+                `模型 ${group.provider}/${model.id} 尚未认证。请先执行 /login ${group.provider} 完成认证,再重新 /vision set。`,"warning",
               );
               return;
             }
@@ -269,7 +262,7 @@ export default function (pi: ExtensionAPI) {
         case "list": {
           const models = listVisionModels(ctx);
           if (models.length === 0) {
-            ctx.ui.notify("aux-vision: 当前没有可用(已认证)的图像识别模型。请先 /login 配置对应 provider。", "warn");
+            ctx.ui.notify("aux-vision: 当前没有可用(已认证)的图像识别模型。请先 /login 配置对应 provider。", "warning");
             return;
           }
           const cfg = loadConfig();
@@ -292,7 +285,7 @@ export default function (pi: ExtensionAPI) {
               cfg = { ...cfg, provider: m.provider, model: m.id };
               ctx.ui.notify(`aux-vision: 自动选用 ${m.provider}/${m.id}。`, "info");
             } else {
-              ctx.ui.notify("aux-vision: 没有可用的图像识别模型,请先 /login 或 /vision set。", "warn");
+              ctx.ui.notify("aux-vision: 没有可用的图像识别模型,请先 /login 或 /vision set。", "warning");
               return;
             }
           }
@@ -312,7 +305,7 @@ export default function (pi: ExtensionAPI) {
         case "test": {
           const cfg = loadConfig();
           if (!cfg || !cfg.enabled || !cfg.provider || !cfg.model) {
-            ctx.ui.notify("aux-vision: 未启用,无法测试。先 /vision set 或 /vision enable。", "warn");
+            ctx.ui.notify("aux-vision: 未启用,无法测试。先 /vision set 或 /vision enable。", "warning");
             return;
           }
           const model = findConfiguredModel(ctx, cfg.provider, cfg.model);
@@ -330,8 +323,9 @@ export default function (pi: ExtensionAPI) {
             ctx.signal,
           );
           // /vision test 也是本会话内实际调用视觉模型:与 execute 一致,成功/失败都算触发
-          footer.on({ type: "call", ok: !result.isError }, ctx.ui);
-          if (result.isError) {
+          const testFailed = isErrorResult(result);
+          footer.on({ type: "call", ok: !testFailed }, ctx.ui);
+          if (testFailed) {
             ctx.ui.notify(`aux-vision 测试失败:${result.content[0].text}`, "error");
             return;
           }

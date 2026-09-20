@@ -17,3 +17,7 @@ The vocabulary the extension uses to tell the footer controller what happened: `
 
 **model selection / 模型选择**:
 The provider/model pair configured for vision analysis. The extension owns it, it can change mid-session via /vision set / enable / disable, and the footer always reflects the current selection, re-read from disk on every event.
+
+**tool result contract / 工具结果契约**:
+The shape of the `details` field every `describe_image` result carries: `{ model, usage }` on success, `{ error: string }` on expected failure. Expected failures are returned with the error text in `content`, never signaled by throwing (see ADR-0001).
+_Avoid_: throw-based error signaling
