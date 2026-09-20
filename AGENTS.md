@@ -16,4 +16,4 @@ Single-context layout (one `CONTEXT.md` + `docs/adr/` at the repo root). See `do
 
 ### Releases
 
-发布流:`push refs/tags/vX.Y.Z` 触发 `.github/workflows/publish.yml` 自动把当前版本 staging 到 npm 暂存区(不直接发布)。Agent 负责 bump 版本、commit、打 annotated tag、push(`git push origin main` + `git push origin refs/tags/vX.Y.Z`),然后停下交还;最终发布由维护者本地执行 `npm stage approve <stage-id>`(2FA 证明在场),Agent 不代跑。错误暂存可 `npm stage reject <stage-id>`(2FA)。
+发布流:`push refs/tags/vX.Y.Z` 触发 `.github/workflows/publish.yml` 自动把当前版本 staging 到 npm 暂存区(不直接发布)。Agent 负责 bump 版本、commit、打 annotated tag、push(`git push origin main` + `git push origin refs/tags/vX.Y.Z`),workflow 跑通后撰写分类发布说明并创建 GitHub Release(见 npm-release skill),然后停下交还 stage-id;最终发布由维护者本地执行 `npm stage approve <stage-id>`(2FA 证明在场),Agent 不代跑。错误暂存可 `npm stage reject <stage-id>`(2FA)。
