@@ -13,9 +13,16 @@ import type { AuxVisionConfig } from "./config";
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 const SYSTEM_PROMPT =
-  "You are a precise image analysis assistant. Answer the user's question about the image factually and precisely. " +
-  "Respond in the same language as the user's question. If the image contains text, code, or error messages, " +
-  "transcribe them accurately. Be concise but complete — include exact values, coordinates, and quoted text where relevant.";
+  // 转录底座契约(ADR-0002):无论问题多窄,都先穷尽转储可见信息,盲模型据此推理,不依赖提问精度。
+  "You are a precise image analysis assistant. Regardless of the question, ALWAYS begin with an exhaustive transcription base: " +
+  "1) classify the image type (terminal screenshot, log output, error dialog, UI/screenshot, photo, diagram, or other); " +
+  "2) transcribe verbatim ALL visible text, code, and error messages — every line, in the original language, untranslated; " +
+  "   note the layout and reading order (top to bottom, blocks, highlighted items); " +
+  "3) coordinates, colors, and non-text visual details are best-effort only. " +
+  "If the image contains no readable text, state that explicitly and describe the visual content instead. " +
+  "Then, in a section headed 'Answer', answer the user's question factually and precisely using the transcription base. " +
+  "End with a completeness attestation: state that all visible text has been transcribed exhaustively, or that no readable text was found. " +
+  "Respond in the same language as the user's question (the transcription itself stays verbatim in the original language).";
 
 // Tool result contract (ADR-0001): success carries { model, usage }, failure { error }.
 // Expected failures are returned, not thrown, so the transcript isError stays false.
@@ -129,11 +136,21 @@ export async function describeImage(
     return errorResult("视觉模型没有返回文本内容");
   }
 
+  // 截断显式化(ADR-0002):SDK 在输出撞到 maxTokens 时标记 stopReason "length",
+  // 此时转录底座可能不完整,必须在头部显式告知,而不是把残缺底座静默交回盲模型。
+  const body =
+    result.stopReason === "length" ? `${TRUNCATION_NOTICE}\n${text}` : text;
+
   return {
-    content: [{ type: "text", text: resizeNote ? `${text}\n${resizeNote}` : text }],
+    content: [{ type: "text", text: resizeNote ? `${body}\n${resizeNote}` : body }],
     details: {
       model: `${model.provider}/${model.id}`,
       usage: result.usage,
     },
   };
 }
+
+// 截断显式化提示语:头部告知底座可能不完整,并把重调主动权交回调用方。
+const TRUNCATION_NOTICE =
+  "注意:视觉模型输出已达 token 上限,转录底座可能不完整,截断通常发生在尾部。" +
+  "如需完整内容,请缩小范围或用更聚焦的 question 重新调用 describe_image。";

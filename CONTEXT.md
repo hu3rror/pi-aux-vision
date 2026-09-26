@@ -21,3 +21,15 @@ The provider/model pair configured for vision analysis. The extension owns it, i
 **tool result contract / 工具结果契约**:
 The shape of the `details` field every `describe_image` result carries: `{ model, usage }` on success, `{ error: string }` on expected failure. Expected failures are returned with the error text in `content`, never signaled by throwing (see ADR-0001).
 _Avoid_: throw-based error signaling
+
+**transcription base / 转录底座**:
+The exhaustive dump every `describe_image` result must begin with, regardless of the question: image-type classification, verbatim transcription of all visible text (untranslated), and layout/reading order. A non-visual main model reasons from this base, so its completeness must not depend on how precisely the question was asked (see ADR-0002).
+_Avoid_: 简述,图片摘要,image summary
+
+**completeness attestation / 完整性自证**:
+The mandatory closing line of a `describe_image` result stating that all visible text was transcribed exhaustively, or that no readable text was found. It tells the non-visual main model the base is complete, so it stops suspecting the vision model "didn't really look".
+_Avoid_: 保证句
+
+**truncation surfacing / 截断显式化**:
+Detecting `stopReason: "length"` (output hit the token cap) and prepending an explicit notice that the transcription base may be incomplete, instead of silently returning a partial base and leaving the non-visual main model to guess.
+_Avoid_: 静默截断

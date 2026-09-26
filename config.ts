@@ -15,7 +15,8 @@ export interface AuxVisionConfig {
 
 export const DEFAULT_CONFIG: Omit<AuxVisionConfig, "provider" | "model"> = {
   enabled: true,
-  maxOutputTokens: 4096,
+  // 转录底座契约(ADR-0002):穷尽转录需要更大预算,截断时工具会显式提示而非静默截断。
+  maxOutputTokens: 8192,
   maxRetries: 2,
   maxRetryDelayMs: 5000,
   showInFooter: true,

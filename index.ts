@@ -52,7 +52,9 @@ export default function (pi: ExtensionAPI) {
       description:
         "Analyze a local image file with a vision-capable model and answer a specific question about it. " +
         "Pass the exact on-disk path and a precise, focused question, e.g. \"extract the stack trace shown in line 4 of the error message\" or \"why is the button shifted 10px to the right?\". " +
-        "The tool reads the file once, sends it to the configured vision model once, and returns the model's answer as text. " +
+        "The tool reads the file once, sends it to the configured vision model once, and returns text. " +
+        "The result ALWAYS begins with an exhaustive transcription base — image type, verbatim transcription of all visible text, and layout/order — followed by the answer to your question and a completeness attestation, so you can reason from the base even about parts you did not ask about. " +
+        "If the result says the transcription was truncated (output hit the token limit), call again with a narrower question or scope. " +
         "Only call this when the actual image content matters — never guess content from the path or filename alone.",
       promptSnippet: "Analyze a local image file with a vision model, answering a precise question",
       promptGuidelines: [

@@ -129,6 +129,37 @@ function ok(name: string) {
   ok("tool result contract: details.error discriminates, no isError field");
 }
 
+// ---- 5c. 截断显式化(ADR-0002):stopReason "length" → 头部显式提示,不静默截断 ----
+{
+  const ctx = makeFakeCtx(async () => ({
+    role: "assistant",
+    content: [{ type: "text", text: "部分转录…" }],
+    api: "openai-completions",
+    provider: "mock",
+    model: "mock",
+    stopReason: "length" as const,
+    timestamp: Date.now(),
+    usage: {
+      input: 10,
+      output: 20,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 30,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+  }));
+  const cfg = { ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" };
+  const model = findConfiguredModel(ctx, cfg.provider, cfg.model)!;
+  const res = await describeImage({ image_path: writePng("trunc.png"), question: "?" }, ctx, model, cfg, undefined);
+  assert.ok(!("error" in res.details), "truncation stays a success result (ADR-0002)");
+  assert.strictEqual(res.details.model, "sensenova-anthropic/sensenova-6.8-flash-lite");
+  assert.strictEqual(res.details.usage.totalTokens, 30);
+  assert.match(res.content[0].text, /token 上限/);
+  assert.match(res.content[0].text, /部分转录/);
+  assert.strictEqual(DEFAULT_CONFIG.maxOutputTokens, 8192, "default output budget raised for exhaustive base (ADR-0002)");
+  ok("stopReason length -> truncation notice prepended, no silent truncation");
+}
+
 // ---- 6. 测试图生成(真实 PowerShell) ----
 {
   const p = await generateTestImage();
