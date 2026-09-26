@@ -31,5 +31,5 @@ The mandatory closing line of a `describe_image` result stating that all visible
 _Avoid_: 保证句
 
 **truncation surfacing / 截断显式化**:
-Detecting `stopReason: "length"` (output hit the token cap) and prepending an explicit notice that the transcription base may be incomplete, instead of silently returning a partial base and leaving the non-visual main model to guess.
+Detecting `stopReason: "length"` (output hit the token cap) and prepending an explicit notice — phrased in the question's language — that the transcription base may be incomplete, instead of silently returning a partial base and leaving the non-visual main model to guess.
 _Avoid_: 静默截断

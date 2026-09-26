@@ -154,10 +154,15 @@ function ok(name: string) {
   assert.ok(!("error" in res.details), "truncation stays a success result (ADR-0002)");
   assert.strictEqual(res.details.model, "sensenova-anthropic/sensenova-6.8-flash-lite");
   assert.strictEqual(res.details.usage.totalTokens, 30);
-  assert.match(res.content[0].text, /token 上限/);
+  assert.match(res.content[0].text, /token limit/); // 英文提问 → 英文提示(语言跟随)
   assert.match(res.content[0].text, /部分转录/);
   assert.strictEqual(DEFAULT_CONFIG.maxOutputTokens, 8192, "default output budget raised for exhaustive base (ADR-0002)");
   ok("stopReason length -> truncation notice prepended, no silent truncation");
+
+  // 中文提问 → 中文提示(CJK 启发式)
+  const resZh = await describeImage({ image_path: writePng("trunc-zh.png"), question: "图里是什么?" }, ctx, model, cfg, undefined);
+  assert.match(resZh.content[0].text, /token 上限/);
+  ok("truncation notice follows question language (CJK heuristic)");
 }
 
 // ---- 6. 测试图生成(真实 PowerShell) ----

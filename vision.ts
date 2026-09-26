@@ -21,7 +21,8 @@ const SYSTEM_PROMPT =
   "3) coordinates, colors, and non-text visual details are best-effort only. " +
   "If the image contains no readable text, state that explicitly and describe the visual content instead. " +
   "Then, in a section headed 'Answer', answer the user's question factually and precisely using the transcription base. " +
-  "End with a completeness attestation: state that all visible text has been transcribed exhaustively, or that no readable text was found. " +
+  "End with a completeness attestation in the response language, using exactly one of: " +
+  "'I have exhaustively transcribed all visible text.' or 'No readable text was found — I described the visual content instead.' " +
   "Respond in the same language as the user's question (the transcription itself stays verbatim in the original language).";
 
 // Tool result contract (ADR-0001): success carries { model, usage }, failure { error }.
@@ -139,7 +140,7 @@ export async function describeImage(
   // 截断显式化(ADR-0002):SDK 在输出撞到 maxTokens 时标记 stopReason "length",
   // 此时转录底座可能不完整,必须在头部显式告知,而不是把残缺底座静默交回盲模型。
   const body =
-    result.stopReason === "length" ? `${TRUNCATION_NOTICE}\n${text}` : text;
+    result.stopReason === "length" ? `${truncationNoticeFor(params.question)}\n${text}` : text;
 
   return {
     content: [{ type: "text", text: resizeNote ? `${body}\n${resizeNote}` : body }],
@@ -150,7 +151,14 @@ export async function describeImage(
   };
 }
 
-// 截断显式化提示语:头部告知底座可能不完整,并把重调主动权交回调用方。
-const TRUNCATION_NOTICE =
-  "注意:视觉模型输出已达 token 上限,转录底座可能不完整,截断通常发生在尾部。" +
-  "如需完整内容,请缩小范围或用更聚焦的 question 重新调用 describe_image。";
+// 截断显式化提示语(ADR-0002):头部告知底座可能不完整,并把重调主动权交回调用方。
+// 语言跟随提问语言,与 prompt 的"同语言作答"规则一致:CJK 提问用中文,否则英文。
+function truncationNoticeFor(question: string): string {
+  const cjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/;
+  return cjk.test(question)
+    ? "注意:视觉模型输出已达 token 上限,转录底座可能不完整,截断通常发生在尾部。" +
+      "如需完整内容,请缩小范围或用更聚焦的 question 重新调用 describe_image。"
+    : "Note: the vision model's output hit the token limit, so the transcription base may be incomplete " +
+      "(truncation usually cuts the tail). To get the full content, narrow the scope or call describe_image " +
+      "again with a more focused question.";
+}

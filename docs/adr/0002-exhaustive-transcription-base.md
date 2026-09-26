@@ -8,4 +8,4 @@ Main models without image input depend entirely on `describe_image`'s text resul
 - Auto-retry with a raised token cap on truncation: a cost/latency spiral; surfacing the truncation and letting the caller re-ask a focused question keeps control where it belongs.
 - Always-on exhaustive base (chosen): calling the tool is already the "image content matters" signal, so the always-on token cost is accepted in exchange for a complete base.
 
-**Consequences**: results are larger (default `maxOutputTokens` raised from 4096 to 8192); the attestation line either guarantees the base is complete or explicitly says it is not; existing installs keep their saved `maxOutputTokens` and can raise it manually in `~/.pi/agent/aux-vision.json`.
+**Consequences**: results are larger (default `maxOutputTokens` raised from 4096 to 8192); the attestation is model-generated and the extension cannot verify completeness itself, so truncation (`stopReason: "length"`) is the one case where incompleteness is known — surfaced by a head notice in the question's language; existing installs keep their saved `maxOutputTokens` and can raise it manually in `~/.pi/agent/aux-vision.json`.
