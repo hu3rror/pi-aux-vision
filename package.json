@@ -30,7 +30,8 @@
     "ui.ts",
     "test-image.ts",
     "README.md",
-    "README_zh-CN.md"
+    "README_zh-CN.md",
+    "LICENSE"
   ],
   "pi": {
     "extensions": [
