@@ -20,7 +20,7 @@ pi -e npm:pi-aux-vision
 
 ## 工作方式
 
-- 启动时读取 `<agent-dir>/extensions/aux-vision.json`(经 pi 官方 `getAgentDir()` 解析,`PI_AGENT_DIR` 生效);0.4.0 之前的旧路径 `~/.pi/agent/aux-vision.json` 仅在新文件缺失时兜底读取,下次保存配置时自动迁移(旧文件保留不动)。无配置时,盲模型会话自动发现第一个可用(已认证且支持图像输入)的视觉模型并写入配置;配置的模型失效时自动回退。
+- 启动时读取 `<agent-dir>/extensions/aux-vision.json`(经 pi 官方 `getAgentDir()` 解析,`PI_AGENT_DIR` 生效);0.4.0 之前的旧路径 `~/.pi/agent/aux-vision.json` 仅在新文件缺失时兜底读取,下次保存配置时自动迁移(旧文件保留不动)。无配置时,盲模型会话自动发现第一个可用(已认证且支持图像输入)的视觉模型并写入配置;配置的模型失效时,同样仅在盲模型会话自动回退。
 - 读图门控:`describe_image` 仅在「插件启用 + 辅助视觉模型已配置 + 当前会话模型不具备读图能力」时对模型可见;具备原生读图能力的模型直接读图,永远看不到该工具;可见性随模型切换与会话恢复(`model_select`)同步,并在 `/vision status` 中展示。
 - 认证、协议序列化、重试全部走 pi 官方管线(`ctx.modelRegistry.complete`),支持 google-generative-ai / openai-completions / anthropic-messages 三种协议。
 - 每次结果都以穷尽转录底座开头(图像类型、全部可见文字逐字转录、布局/顺序),再回答问题并以完整性自证句收尾——不具备图像输入的主模型可以直接从底座推理,而不只是依赖狭窄的回答。输出撞到 token 上限时,工具会在头部显式提示截断,而非静默返回残缺底座。

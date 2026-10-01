@@ -22,12 +22,11 @@ export const DEFAULT_CONFIG: Omit<AuxVisionConfig, "provider" | "model"> = {
   showInFooter: true,
 };
 
-/** 规范配置路径:经 pi 上游 getAgentDir() 解析,置于用户扩展目录下(ADR-0003)。 */
 export function canonicalConfigPath(): string {
   return path.join(getAgentDir(), "extensions", "aux-vision.json");
 }
 
-/** 旧版配置路径:仅当规范路径缺失时作为兼容兜底读取(ADR-0003)。 */
+/** 旧版路径:仅当规范路径缺失时作为兜底读取,从不写入(ADR-0003)。 */
 export function legacyConfigPath(): string {
   return path.join(getAgentDir(), "aux-vision.json");
 }

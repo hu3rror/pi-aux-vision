@@ -33,7 +33,7 @@ export default function (pi: ExtensionAPI) {
     else if (!active && has) pi.setActiveTools(current.filter((t) => t !== TOOL_NAME));
   }
 
-  /** 写入配置并启用指定视觉模型;返回给用户的提示文本。可见性由门控决定,这里只落配置。 */
+  /** 写入配置并启用指定视觉模型;返回给用户的提示文本。可见性由门控决定,这里只落配置(ADR-0004)。 */
   function applySelection(provider: string, modelId: string): string {
     const prev = loadConfig() ?? { ...DEFAULT_CONFIG, provider: "", model: "" };
     const fresh: AuxVisionConfig = { ...prev, enabled: true, provider, model: modelId };
@@ -41,7 +41,7 @@ export default function (pi: ExtensionAPI) {
     return `aux-vision: 已配置并启用 ${provider}/${modelId}。`;
   }
 
-  /** 加载即注册;注册后立即从可见集合移除,保证工具不因注册而闪现(兼容 pi 0.86/0.99,ADR-0004)。 */
+  /** 加载即注册;注册后立即移出可见集合(pi 0.86 无 defaultActive,稳态等价,ADR-0004)。 */
   function registerToolOnce() {
     if (toolRegistered) return;
     toolRegistered = true;
@@ -135,7 +135,7 @@ export default function (pi: ExtensionAPI) {
       saveConfig({ ...base, provider: m.provider, model: m.id });
       ensureToolActive(true);
       ctx.ui.notify(
-        `aux-vision: 已自动配置视觉模型 ${m.provider}/${m.id}。用 /vision set 或 /vision test 调整/验证。`,
+        `aux-vision: 已自动配置视觉模型 ${m.provider}/${m.id},describe_image 已介入。用 /vision set 或 /vision test 调整/验证。`,
         "info",
       );
       return { activated: true, announced: true };
@@ -200,8 +200,7 @@ export default function (pi: ExtensionAPI) {
     // 新会话:footer 回到未触发(不显示);门控通知按会话重置
     footer.on({ type: "reset" }, ctx.ui);
     legacyNotified = false;
-    // 旧路径回退:每会话通知一次,不引导任何迁移命令(迁移是保存时的自动行为,ADR-0003);
-    // 仅在旧配置实际可读时通知,损坏的旧文件不算"正在使用"
+    // 旧路径回退:每会话一次,仅旧配置实际可读时通知,不引导迁移命令(ADR-0003)
     if (resolveConfigFile()?.source === "legacy" && loadConfig() !== null && !legacyNotified) {
       legacyNotified = true;
       ctx.ui.notify(
