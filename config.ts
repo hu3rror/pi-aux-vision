@@ -22,14 +22,31 @@ export const DEFAULT_CONFIG: Omit<AuxVisionConfig, "provider" | "model"> = {
   showInFooter: true,
 };
 
-export function configPath(): string {
+/** 规范配置路径:经 pi 上游 getAgentDir() 解析,置于用户扩展目录下(ADR-0003)。 */
+export function canonicalConfigPath(): string {
+  return path.join(getAgentDir(), "extensions", "aux-vision.json");
+}
+
+/** 旧版配置路径:仅当规范路径缺失时作为兼容兜底读取(ADR-0003)。 */
+export function legacyConfigPath(): string {
   return path.join(getAgentDir(), "aux-vision.json");
+}
+
+export type ConfigSource = "canonical" | "legacy";
+
+/** 生效配置文件:规范优先,缺失回退旧路径,两文件整选不合并(ADR-0003)。 */
+export function resolveConfigFile(): { path: string; source: ConfigSource } | null {
+  if (fs.existsSync(canonicalConfigPath())) return { path: canonicalConfigPath(), source: "canonical" };
+  if (fs.existsSync(legacyConfigPath())) return { path: legacyConfigPath(), source: "legacy" };
+  return null;
 }
 
 /** 读取配置;文件缺失或损坏返回 null。 */
 export function loadConfig(): AuxVisionConfig | null {
+  const file = resolveConfigFile();
+  if (!file) return null;
   try {
-    const data = JSON.parse(fs.readFileSync(configPath(), "utf-8")) as Partial<AuxVisionConfig>;
+    const data = JSON.parse(fs.readFileSync(file.path, "utf-8")) as Partial<AuxVisionConfig>;
     return {
       enabled: typeof data.enabled === "boolean" ? data.enabled : DEFAULT_CONFIG.enabled,
       provider: typeof data.provider === "string" ? data.provider : "",
@@ -48,7 +65,8 @@ export function loadConfig(): AuxVisionConfig | null {
 }
 
 export function saveConfig(cfg: AuxVisionConfig): void {
-  const dir = path.dirname(configPath());
+  // 写入永远走规范路径(惰性迁移:下次保存自动把旧内容落盘到新位置,旧文件保留不动,ADR-0003)。
+  const dir = path.dirname(canonicalConfigPath());
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(configPath(), JSON.stringify(cfg, null, 2) + "\n", "utf-8");
+  fs.writeFileSync(canonicalConfigPath(), JSON.stringify(cfg, null, 2) + "\n", "utf-8");
 }

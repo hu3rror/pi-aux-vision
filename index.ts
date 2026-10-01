@@ -1,9 +1,9 @@
-import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext, type ModelSelectEvent } from "@earendil-works/pi-coding-agent";
 import type { SelectItem } from "@earendil-works/pi-tui";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { DEFAULT_CONFIG, loadConfig, saveConfig, type AuxVisionConfig } from "./config";
-import { findConfiguredModel, findFirstVisionModel, formatModelDescription, formatProviderDescription, groupVisionProviders, listVisionModels, resolveVisionCandidates } from "./discovery";
+import { DEFAULT_CONFIG, legacyConfigPath, loadConfig, resolveConfigFile, saveConfig, type AuxVisionConfig } from "./config";
+import { findConfiguredModel, findFirstVisionModel, formatModelDescription, formatProviderDescription, groupVisionProviders, isVisionModel, listVisionModels, resolveVisionCandidates } from "./discovery";
 import { describeImage, isErrorResult, type DescribeImageResult } from "./vision";
 import { generateTestImage } from "./test-image";
 import { createFooterController } from "./footer-controller";
@@ -15,10 +15,15 @@ const TEST_QUESTION = "描述这张测试图:复述图中所有文字,并说明�
 
 export default function (pi: ExtensionAPI) {
   let toolRegistered = false;
-  let initialized = false;
+  /** 旧路径回退通知:每会话一次(ADR-0003)。 */
+  let legacyNotified = false;
 
   // footer controller:状态与 footer key 收在闭包,事件点一行转发
   const footer = createFooterController();
+
+  // 加载即注册并保持不介入:可见性完全由门控在会话/模型事件中决定(ADR-0004)
+  registerToolOnce();
+  ensureToolActive(false);
 
   /** 差分控制 describe_image 在当前会话的可见性,不动其他工具。 */
   function ensureToolActive(active: boolean) {
@@ -28,21 +33,15 @@ export default function (pi: ExtensionAPI) {
     else if (!active && has) pi.setActiveTools(current.filter((t) => t !== TOOL_NAME));
   }
 
-  /** 注册工具并确保对模型可见。 */
-  function enableTool() {
-    registerToolOnce();
-    ensureToolActive(true);
-  }
-
-  /** 写入配置并启用指定视觉模型;返回给用户的提示文本。 */
+  /** 写入配置并启用指定视觉模型;返回给用户的提示文本。可见性由门控决定,这里只落配置。 */
   function applySelection(provider: string, modelId: string): string {
     const prev = loadConfig() ?? { ...DEFAULT_CONFIG, provider: "", model: "" };
     const fresh: AuxVisionConfig = { ...prev, enabled: true, provider, model: modelId };
     saveConfig(fresh);
-    enableTool();
     return `aux-vision: 已配置并启用 ${provider}/${modelId}。`;
   }
 
+  /** 加载即注册;注册后立即从可见集合移除,保证工具不因注册而闪现(兼容 pi 0.86/0.99,ADR-0004)。 */
   function registerToolOnce() {
     if (toolRegistered) return;
     toolRegistered = true;
@@ -103,60 +102,122 @@ export default function (pi: ExtensionAPI) {
     return describeImage(params, ctx, model, cfg, signal);
   }
 
-  async function initialize(ctx: ExtensionContext) {
-    if (initialized) return;
-    initialized = true;
-
+  /** 门控核心(ADR-0004):工具可见 ⇔ 启用 && 已配置可用 && 当前模型已定且盲。 */
+  function syncToolVisibility(ctx: ExtensionContext): { activated: boolean; announced: boolean } {
     const cfg = loadConfig();
-    const hasSelection = Boolean(cfg && cfg.provider && cfg.model);
+    const main = ctx.model;
+    const blind = main ? !isVisionModel(main) : false;
+    const inactive = { activated: false, announced: false };
 
-    if (hasSelection) {
-      if (!cfg!.enabled) return; // 用户主动禁用,保持安静
-      if (findConfiguredModel(ctx, cfg!.provider, cfg!.model)) {
-        enableTool();
-        return;
-      }
-      // 配置失效 → 回退自动发现
-      const fallback = findFirstVisionModel(ctx);
-      if (fallback) {
-        const fresh: AuxVisionConfig = { ...cfg!, provider: fallback.provider, model: fallback.id };
-        saveConfig(fresh);
-        enableTool();
-        ctx.ui.notify(
-          `aux-vision: 配置的模型 ${cfg!.provider}/${cfg!.model} 不可用,已回退至 ${fallback.provider}/${fallback.id} 并写入配置。`,
-          "warning",
-        );
-      } else {
-        ctx.ui.notify(
-          "aux-vision: 配置的模型不可用,且当前没有其他可用的图像识别模型,插件未启用。",
-          "warning",
-        );
-      }
-      return;
+    // 用户主动禁用:保持安静,任何会话都不介入
+    if (cfg && !cfg.enabled) {
+      ensureToolActive(false);
+      return inactive;
     }
 
-    // 无配置 → 自动发现第一个支持图像输入的模型并写入配置
-    const m = findFirstVisionModel(ctx);
-    if (m) {
-      const fresh: AuxVisionConfig = { ...DEFAULT_CONFIG, provider: m.provider, model: m.id };
-      saveConfig(fresh);
-      enableTool();
+    // 未配置(无文件或缺 provider/model):仅在主模型已定且盲时自动发现,视觉会话不写配置、不通知
+    const configured = Boolean(cfg && cfg.provider && cfg.model);
+    if (!configured) {
+      if (!blind) {
+        ensureToolActive(false);
+        return inactive;
+      }
+      const m = findFirstVisionModel(ctx);
+      if (!m) {
+        ensureToolActive(false);
+        ctx.ui.notify(
+          "aux-vision: 未检测到可用的图像识别模型,插件未启用。用 /vision set <provider> <model> 配置。",
+          "warning",
+        );
+        return inactive;
+      }
+      const base: AuxVisionConfig = cfg ?? { ...DEFAULT_CONFIG, provider: "", model: "" };
+      saveConfig({ ...base, provider: m.provider, model: m.id });
+      ensureToolActive(true);
       ctx.ui.notify(
         `aux-vision: 已自动配置视觉模型 ${m.provider}/${m.id}。用 /vision set 或 /vision test 调整/验证。`,
         "info",
       );
-    } else {
+      return { activated: true, announced: true };
+    }
+
+    // 配置了模型但不可用 → 回退自动发现(仅盲会话,与旧行为一致)
+    if (!findConfiguredModel(ctx, cfg!.provider, cfg!.model)) {
+      if (!blind) {
+        ensureToolActive(false);
+        return inactive;
+      }
+      const fallback = findFirstVisionModel(ctx);
+      if (!fallback) {
+        ensureToolActive(false);
+        ctx.ui.notify(
+          "aux-vision: 配置的模型不可用,且当前没有其他可用的图像识别模型,插件未启用。",
+          "warning",
+        );
+        return inactive;
+      }
+      const fresh: AuxVisionConfig = { ...cfg!, provider: fallback.provider, model: fallback.id };
+      saveConfig(fresh);
+      ensureToolActive(true);
       ctx.ui.notify(
-        "aux-vision: 未检测到可用的图像识别模型,插件未启用。用 /vision set <provider> <model> 配置。",
+        `aux-vision: 配置的模型 ${cfg!.provider}/${cfg!.model} 不可用,已回退至 ${fallback.provider}/${fallback.id} 并写入配置。`,
         "warning",
       );
+      return { activated: true, announced: true };
     }
+
+    const wasActive = pi.getActiveTools().includes(TOOL_NAME);
+    ensureToolActive(blind);
+    return { activated: blind && !wasActive, announced: false };
   }
 
-  pi.on("session_start", async (_event, ctx) => {
-    // 新会话:footer 回到未触发(不显示);模型变更由 initialize 决定
+  /** 门控状态描述:/vision status 展示用(ADR-0004)。 */
+  function gatingNote(ctx: ExtensionContext, cfg: AuxVisionConfig | null): string {
+    if (!cfg) return "门控:未配置视觉模型,describe_image 不介入";
+    if (!cfg.enabled) return "门控:插件已禁用,describe_image 不介入";
+    if (!cfg.provider || !cfg.model) return "门控:未配置视觉模型,describe_image 不介入";
+    if (!ctx.model) return "门控:当前模型未定,describe_image 暂不介入";
+    return isVisionModel(ctx.model)
+      ? "门控:当前模型支持原生读图,describe_image 未介入"
+      : "门控:当前模型不支持读图,describe_image 已介入";
+  }
+
+  /** 门控反馈后缀:当前模型具读图能力时追加说明,避免"已配置并启用"误导(ADR-0004)。 */
+  function gatingSuffix(ctx: ExtensionContext): string {
+    return ctx.model && isVisionModel(ctx.model)
+      ? "当前模型支持原生读图,describe_image 保持不介入。"
+      : "";
+  }
+
+  /** 写入选择并同步门控:通知(含门控后缀)+ 单点同步 + footer 事件(ADR-0004)。 */
+  function applyAndSync(provider: string, modelId: string, footerEvent: "set" | "enable", ctx: ExtensionContext): void {
+    ctx.ui.notify(applySelection(provider, modelId) + gatingSuffix(ctx), "info");
+    syncToolVisibility(ctx);
+    footer.on({ type: footerEvent }, ctx.ui);
+  }
+
+  pi.on("session_start", (_event, ctx) => {
+    // 新会话:footer 回到未触发(不显示);门控通知按会话重置
     footer.on({ type: "reset" }, ctx.ui);
-    await initialize(ctx);
+    legacyNotified = false;
+    // 旧路径回退:每会话通知一次,不引导任何迁移命令(迁移是保存时的自动行为,ADR-0003);
+    // 仅在旧配置实际可读时通知,损坏的旧文件不算"正在使用"
+    if (resolveConfigFile()?.source === "legacy" && loadConfig() !== null && !legacyNotified) {
+      legacyNotified = true;
+      ctx.ui.notify(
+        `aux-vision: 正在使用旧路径配置(${legacyConfigPath()}),配置变更时将自动写入新路径。`,
+        "info",
+      );
+    }
+    syncToolVisibility(ctx);
+  });
+
+  pi.on("model_select", (event: ModelSelectEvent, ctx: ExtensionContext) => {
+    // 盲→视觉:静默退出;视觉→盲:工具出现且无自带通知时提示一次(ADR-0004)
+    const { activated, announced } = syncToolVisibility(ctx);
+    if (activated && !announced) {
+      ctx.ui.notify("aux-vision: describe_image 已介入(当前模型不支持读图)。", "info");
+    }
   });
 
   pi.registerCommand("vision", {
@@ -183,7 +244,7 @@ export default function (pi: ExtensionAPI) {
         case "status": {
           const cfg = loadConfig();
           if (!cfg || !cfg.provider || !cfg.model) {
-            ctx.ui.notify("aux-vision: 未配置视觉模型,插件未启用。", "warning");
+            ctx.ui.notify(`aux-vision: 未配置视觉模型,插件未启用。\n${gatingNote(ctx, cfg)}`, "warning");
             return;
           }
           const model = findConfiguredModel(ctx, cfg.provider, cfg.model);
@@ -191,7 +252,7 @@ export default function (pi: ExtensionAPI) {
             ? `协议 ${model.api} | 上下文 ${model.contextWindow} | 输出上限 ${model.maxTokens}`
             : "(模型当前不可用)";
           ctx.ui.notify(
-            `aux-vision: ${cfg.enabled ? "启用" : "已禁用"} | ${cfg.provider}/${cfg.model} | footer 显示:${cfg.showInFooter ? "开" : "关"}\n${detail}`,
+            `aux-vision: ${cfg.enabled ? "启用" : "已禁用"} | ${cfg.provider}/${cfg.model} | footer 显示:${cfg.showInFooter ? "开" : "关"}\n${detail}\n${gatingNote(ctx, cfg)}`,
             cfg.enabled ? "info" : "warning",
           );
           return;
@@ -248,8 +309,7 @@ export default function (pi: ExtensionAPI) {
               );
               return;
             }
-            ctx.ui.notify(applySelection(group.provider, model.id), "info");
-            footer.on({ type: "set" }, ctx.ui);
+            applyAndSync(group.provider, model.id, "set", ctx);
             return;
           }
           const model = findConfiguredModel(ctx, provider, modelId);
@@ -257,8 +317,7 @@ export default function (pi: ExtensionAPI) {
             ctx.ui.notify(`模型 ${provider}/${modelId} 不可用(不存在、不支持图像输入或未认证)。运行 /vision list 查看可用模型。`, "error");
             return;
           }
-          ctx.ui.notify(applySelection(provider, modelId), "info");
-          footer.on({ type: "set" }, ctx.ui);
+          applyAndSync(provider, modelId, "set", ctx);
           return;
         }
         case "list": {
@@ -291,15 +350,15 @@ export default function (pi: ExtensionAPI) {
               return;
             }
           }
-          ctx.ui.notify(applySelection(cfg.provider, cfg.model), "info");
-          footer.on({ type: "enable" }, ctx.ui);
+          applyAndSync(cfg.provider, cfg.model, "enable", ctx);
           return;
         }
         case "disable": {
           const cfg = loadConfig() ?? { ...DEFAULT_CONFIG, provider: "", model: "" };
           const fresh: AuxVisionConfig = { ...cfg, enabled: false };
           saveConfig(fresh);
-          ensureToolActive(false);
+          // 走单点同步:disabled 状态由门控统一处理为不介入(ADR-0004)
+          syncToolVisibility(ctx);
           ctx.ui.notify("aux-vision: 已禁用,describe_image 工具不再对模型可见。", "info");
           footer.on({ type: "disable" }, ctx.ui);
           return;

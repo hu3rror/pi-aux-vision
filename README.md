@@ -2,7 +2,7 @@
 
 [中文](README_zh-CN.md)
 
-Registers a `describe_image` native tool for Pi: the main model (e.g. `deepseek-v4-flash`, which has no image input) decides when to call it, passes an image path and a specific question, and the extension routes the request through pi's official pipeline to a configured vision model. The result comes back as a `tool_result` in the conversation context.
+Registers a `describe_image` native tool for Pi: a session model without image input (e.g. `deepseek-v4-flash`) decides when to call it, passes an image path and a specific question, and the extension routes the request through pi's official pipeline to a configured vision model. The result comes back as a `tool_result` in the conversation context. Session models with native vision read images themselves — the tool is only declared to models that lack image input.
 
 ## Install
 
@@ -20,7 +20,8 @@ Manual install: drop the `pi-aux-vision/` directory under `~/.pi/agent/extension
 
 ## How it works
 
-- On startup, reads `~/.pi/agent/aux-vision.json`; with no config, auto-discovers the first available (authenticated, image-capable) vision model and writes it to the config. Falls back automatically when the configured model becomes unavailable.
+- On startup, reads `<agent-dir>/extensions/aux-vision.json` (derived from pi's official `getAgentDir()`, so `PI_AGENT_DIR` is honored); the pre-0.4.0 location `~/.pi/agent/aux-vision.json` is still read as a fallback while the new file is absent, and the next config write migrates it automatically (the legacy file stays untouched). With no config, a blind session auto-discovers the first available (authenticated, image-capable) vision model and writes it to the config; falls back automatically when the configured model becomes unavailable.
+- `describe_image` is only declared to the session model when the plugin is enabled, an auxiliary vision model is configured, and the **current session model lacks image input** (vision gating). A vision-capable model reads images natively and never sees the tool; visibility follows model switches and session restore (`model_select`) and is shown in `/vision status`.
 - Auth, protocol serialization, and retries all go through pi's official pipeline (`ctx.modelRegistry.complete`), supporting `google-generative-ai`, `openai-completions`, and `anthropic-messages` protocols.
 - Every result begins with an exhaustive transcription base (image type, verbatim transcription of all visible text, layout/order), then answers the question and ends with a completeness attestation — so a main model without image input can reason from the base, not just from a narrow answer. When the output hits the token cap, the tool prepends an explicit truncation notice instead of silently returning a partial base.
 - Image limit is 10 MB (the intersection of the three providers' limits); oversized images are compressed with pi's official `resizeImage` before failing.
@@ -32,7 +33,9 @@ Verified against pi `0.86.0` (2026-09-19). The peer dependency range stays `"*"`
 
 ## Configuration
 
-`~/.pi/agent/aux-vision.json`:
+`<agent-dir>/extensions/aux-vision.json` (e.g. `~/.pi/agent/extensions/aux-vision.json`):
+
+The legacy path `~/.pi/agent/aux-vision.json` (pre-0.4.0) is honored only while the new file does not exist; once the new file exists it takes precedence, and every write targets it.
 
 ```json
 {
@@ -55,10 +58,10 @@ Verified against pi `0.86.0` (2026-09-19). The peer dependency range stays `"*"`
 
 | Command | Description |
 |---|---|
-| `/vision status` | Current provider/model, protocol, enabled state, footer switch |
+| `/vision status` | Current provider/model, protocol, enabled state, footer switch, and gating state (whether `describe_image` is intervening) |
 | `/vision set <provider> <model>` | Set a vision model explicitly and enable it, writes to config |
 | `/vision list` | List available (authenticated) image models, mark the current one |
-| `/vision enable` / `/vision disable` | Toggle; when disabled, `describe_image` is hidden from the main model |
+| `/vision enable` / `/vision disable` | Toggle; `describe_image` is hidden while disabled or while the current model has native vision |
 | `/vision test [path]` | Verify the full pipeline with an auto-generated test image; optional custom path |
 
 ## Tool
@@ -84,7 +87,7 @@ node .test/build.js && node .test/test-run.mjs
 
 Type compatibility against the current pi SDK is verified with `npm run typecheck`.
 
-`.test/` bundles the extension modules with mocked pi dependencies via esbuild and covers config read/write, model discovery, `describe_image` success/failure paths, test-image generation, and the footer state machine + wiring.
+`.test/` bundles the extension modules with mocked pi dependencies via esbuild and covers config read/write (canonical + legacy paths), model discovery, `describe_image` success/failure paths, test-image generation, the footer state machine + wiring, and vision gating.
 
 ## License
 

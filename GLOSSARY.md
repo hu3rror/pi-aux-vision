@@ -16,7 +16,24 @@ _Avoid_: footer 接线,footer 状态机
 The vocabulary the extension uses to tell the footer controller what happened: `reset` (new session), `call` (a describe_image invocation completed — success or failure, even one that never reached the model), `set`/`enable` (model selection changed), `disable` (extension disabled). `reset` and `call` change the controller's state; `set`/`enable`/`disable` only trigger a re-read of the selection.
 
 **model selection / 模型选择**:
-The provider/model pair configured for vision analysis. The extension owns it, it can change mid-session via /vision set / enable / disable, and the footer always reflects the current selection, re-read from disk on every event.
+The provider/model pair configured for vision analysis. The extension owns it, it can change mid-session via /vision set / enable / disable, and the footer always reflects the current selection, re-read from disk on every event. Distinct from the **session model**, which drives the conversation.
+_Avoid_: 视觉模型
+
+**session model / 当前会话模型**:
+The model driving the current session (pi's `ExtensionContext.model`), judged by its declared `input` capabilities — distinct from the **model selection**, which is the auxiliary pair configured for vision analysis. Whether it can read images natively decides whether `describe_image` intervenes (see **vision gating**).
+_Avoid_: 主模型(易与 model selection 混淆)
+
+**vision gating / 读图介入**:
+The rule that `describe_image` is declared to the session model only when the plugin is enabled, an auxiliary vision model is configured and available, and the **session model** lacks image input. Visibility re-evaluates on session start and model switches; vision-capable sessions read images natively without the tool.
+_Avoid_: 抢工作,门控开关(它不是配置字段)
+
+**canonical config / 规范配置**:
+The configuration file the extension owns at the user level, located per pi's convention for user extensions. It takes precedence over older configuration once present, and every write targets it.
+_Avoid_: 配置文件路径
+
+**legacy config / 旧版配置**:
+Configuration produced by releases ≤0.3.0, honored only while no canonical config exists; the next configuration change migrates it automatically to the canonical location, and the legacy file itself is left untouched.
+_Avoid_: 迁移命令(不存在这样的命令)
 
 **tool result contract / 工具结果契约**:
 The shape of the `details` field every `describe_image` result carries: `{ model, usage }` on success, `{ error: string }` on expected failure. Expected failures are returned with the error text in `content`, never signaled by throwing (see ADR-0001).

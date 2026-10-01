@@ -41,7 +41,7 @@ export interface MockToolResult {
   details: { model: string; usage: { totalTokens: number } } | { error: string };
 }
 
-export function makeFakeCtx(completeImpl?: (model: FakeModel) => unknown) {
+export function makeFakeCtx(completeImpl?: (model: FakeModel) => unknown, model?: FakeModel) {
   const models: FakeModel[] = [
     { provider: "sensenova-anthropic", id: "sensenova-6.8-flash-lite", api: "anthropic-messages", input: ["text", "image"], contextWindow: 262144, maxTokens: 65536 },
     { provider: "google", id: "gemini-2.5-flash", api: "google-generative-ai", input: ["text", "image"], contextWindow: 1048576, maxTokens: 65536 },
@@ -51,9 +51,11 @@ export function makeFakeCtx(completeImpl?: (model: FakeModel) => unknown) {
   const noAuth = new Set<string>(["google/gemini-2.5-flash"]);
   const isAuthed = (m: FakeModel) => !noAuth.has(`${m.provider}/${m.id}`);
   const statusCalls: { key: string; text: string | undefined }[] = [];
+  const notifies: { text: string; level: string | undefined }[] = [];
   return {
     cwd: os.tmpdir(),
     signal: undefined,
+    model,
     modelRegistry: {
       getAll: () => models,
       getAvailable: () => models.filter(isAuthed),
@@ -77,15 +79,18 @@ export function makeFakeCtx(completeImpl?: (model: FakeModel) => unknown) {
         },
       })),
     },
-    // footer 接线测试:记录 setStatus 调用;notify/theme 保持可用
+    // footer 接线测试:记录 setStatus 调用;notify 记录通知文本;theme 保持可用
     ui: {
       setStatus: (key: string, text: string | undefined) => {
         statusCalls.push({ key, text });
       },
-      notify: () => {},
+      notify: (text: string, level?: string) => {
+        notifies.push({ text, level });
+      },
       theme: fakeTheme,
     },
     uiStatusCalls: statusCalls,
+    uiNotifies: notifies,
   };
 }
 

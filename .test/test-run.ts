@@ -17,31 +17,51 @@ function ok(name: string) {
   console.log(`  PASS ${name}`);
 }
 
-// ---- 1. 配置往返 ----
+// ---- 1. 配置往返与路径解析(ADR-0003:写入规范路径,旧路径仅缺失时兜底)----
 {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aux-vision-cfg-"));
   setTestAgentDir(dir);
+  const canonical = path.join(dir, "extensions", "aux-vision.json");
+  const legacy = path.join(dir, "aux-vision.json");
+
   const cfg = { ...DEFAULT_CONFIG, provider: "google", model: "gemini-2.5-flash" };
   saveConfig(cfg);
-  const loaded = loadConfig();
-  assert.deepStrictEqual(loaded, cfg);
-  ok("config round-trip");
-  // showInFooter 缺失 → 默认 true(旧配置文件兼容)
-  fs.writeFileSync(path.join(dir, "aux-vision.json"), JSON.stringify({ provider: "google", model: "gemini-2.5-flash" }));
+  // 写入永远落在规范路径(extensions/ 子目录),旧路径不产生文件
+  assert.ok(fs.existsSync(canonical), "save writes canonical path");
+  assert.ok(!fs.existsSync(legacy), "save does not write legacy path");
+  assert.deepStrictEqual(loadConfig(), cfg);
+  ok("config round-trip via canonical path");
+
+  // 规范路径缺失 → 回退旧路径(兼容);showInFooter 缺失 → 默认 true
+  fs.rmSync(canonical);
+  fs.writeFileSync(legacy, JSON.stringify({ provider: "google", model: "gemini-2.5-flash" }));
   assert.strictEqual(loadConfig()?.showInFooter, true);
-  ok("showInFooter missing -> defaults true");
-  // showInFooter: false 往返
-  saveConfig({ ...DEFAULT_CONFIG, provider: "google", model: "gemini-2.5-flash", showInFooter: false });
-  assert.strictEqual(loadConfig()?.showInFooter, false);
-  ok("showInFooter false round-trips");
-  // 损坏文件 → null
-  fs.writeFileSync(path.join(dir, "aux-vision.json"), "{ not json");
+  assert.strictEqual(loadConfig()?.model, "gemini-2.5-flash");
+  ok("legacy fallback when canonical missing");
+
+  // canonical 优先:两文件并存时读 canonical,整选不合并字段
+  fs.writeFileSync(canonical, JSON.stringify({ provider: "google", model: "gemini-3.1-flash-lite", showInFooter: false }));
+  fs.writeFileSync(legacy, JSON.stringify({ provider: "google", model: "gemini-2.5-flash" }));
+  const prio = loadConfig()!;
+  assert.strictEqual(prio.model, "gemini-3.1-flash-lite");
+  assert.strictEqual(prio.showInFooter, false, "canonical field wins, no merging");
+  ok("canonical precedence over legacy (whole-file selection)");
+
+  // canonical 存在但损坏 → null(文件存在即管制,不静默回退 legacy)
+  fs.writeFileSync(canonical, "{ not json");
   assert.strictEqual(loadConfig(), null);
-  ok("config corrupt -> null");
-  // 缺失 → null
-  fs.rmSync(path.join(dir, "aux-vision.json"));
+  ok("corrupt canonical -> null (no silent legacy fallback)");
+
+  // legacy 损坏 → null
+  fs.rmSync(canonical);
+  fs.writeFileSync(legacy, "{ not json");
   assert.strictEqual(loadConfig(), null);
-  ok("config missing -> null");
+  ok("corrupt legacy -> null");
+
+  // 两文件都缺失 → null
+  fs.rmSync(legacy);
+  assert.strictEqual(loadConfig(), null);
+  ok("both missing -> null");
 }
 
 // ---- 2. 自动发现顺序 ----
@@ -479,6 +499,134 @@ function ok(name: string) {
   await cmd.handler(`test ${png}`, boom);
   assert.match(boom.uiStatusCalls.at(-1)!.text!, /\[error\]!\[\/error\]$/);
   ok("/vision test failure appends error !");
+}
+
+// ---- 12. 读图门控(ADR-0004):describe_image 仅对不具备读图能力的主模型可见 ----
+{
+  const vision = { provider: "google", id: "gemini-3.1-flash-lite", api: "google-generative-ai", input: ["text", "image"], contextWindow: 1048576, maxTokens: 65536 };
+  const blind = { provider: "sensenova", id: "deepseek-v4-flash", api: "openai-completions", input: ["text"], contextWindow: 1048576, maxTokens: 65536 };
+
+  /** 启动样板:独立 agent 目录 + 注册 + session_start;返回 pi 桩、记录通知的 ctx 与目录。 */
+  async function boot(model?: unknown, setup?: (dir: string) => void) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aux-vision-gate-"));
+    setTestAgentDir(dir);
+    const fake = makeFakePi();
+    extension(fake.pi as never);
+    setup?.(dir);
+    const ctx = makeFakeCtx(undefined, model as never);
+    await fake.fire("session_start", {}, ctx);
+    return { fake, ctx, dir };
+  }
+
+  // 加载即注册,但不激活:门控批准前不进入模型可见集合
+  {
+    const fake = makeFakePi();
+    extension(fake.pi as never);
+    assert.ok(fake.tool("describe_image"), "tool registered at load");
+    assert.deepStrictEqual(fake.pi.getActiveTools(), []);
+    ok("tool registered inactive at load");
+  }
+
+  // 视觉主模型:配置有效也不介入
+  {
+    const { fake } = await boot(vision, () => saveConfig({ ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" }));
+    assert.ok(!fake.pi.getActiveTools().includes("describe_image"));
+    ok("vision-capable main model -> tool not intervening");
+  }
+
+  // 盲主模型:配置有效 → 介入
+  {
+    const { fake } = await boot(blind, () => saveConfig({ ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" }));
+    assert.ok(fake.pi.getActiveTools().includes("describe_image"));
+    ok("blind main model -> tool intervening");
+  }
+
+  // model_select 驱动:模型未定→盲(介入+通知)→视觉(静默退出)
+  {
+    const { fake, ctx } = await boot(undefined, () => saveConfig({ ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" }));
+    assert.ok(!fake.pi.getActiveTools().includes("describe_image"), "undefined model -> not active");
+    ctx.model = blind;
+    await fake.fire("model_select", { model: blind, previousModel: undefined, source: "restore" }, ctx);
+    assert.ok(fake.pi.getActiveTools().includes("describe_image"), "switch to blind -> active");
+    assert.ok(ctx.uiNotifies.some((n) => n.text.includes("已介入")));
+    ctx.model = vision;
+    await fake.fire("model_select", { model: vision, previousModel: blind, source: "set" }, ctx);
+    assert.ok(!fake.pi.getActiveTools().includes("describe_image"), "switch to vision -> inactive");
+    ok("model_select toggles gating, announces activation, silent deactivation");
+  }
+
+  // 未配置 + 视觉主模型 → 不自动发现、不写配置、不通知
+  {
+    const { fake, ctx, dir } = await boot(vision);
+    assert.ok(!fs.existsSync(path.join(dir, "extensions", "aux-vision.json")));
+    assert.strictEqual(ctx.uiNotifies.length, 0);
+    assert.ok(!fake.pi.getActiveTools().includes("describe_image"));
+    ok("unconfigured vision session -> no discovery, no config write, no notify");
+  }
+
+  // 未配置 + 盲主模型 → 自动发现、写规范路径、通知、介入
+  {
+    const { fake, ctx, dir } = await boot(blind);
+    assert.ok(fs.existsSync(path.join(dir, "extensions", "aux-vision.json")));
+    const written = loadConfig()!;
+    assert.ok(written.provider && written.model);
+    assert.ok(fake.pi.getActiveTools().includes("describe_image"));
+    assert.ok(ctx.uiNotifies.some((n) => n.text.includes("自动配置")));
+    ok("unconfigured blind session -> auto-discovery, canonical write, notify, active");
+  }
+
+  // /vision enable 在视觉主模型下:配置写入但工具不介入,反馈说明原因
+  {
+    const { fake, ctx } = await boot(vision);
+    const cmd = fake.command("vision")!;
+    await cmd.handler("enable", ctx);
+    assert.strictEqual(loadConfig()?.enabled, true, "config enabled: true");
+    assert.ok(!fake.pi.getActiveTools().includes("describe_image"), "still gated off");
+    assert.ok(ctx.uiNotifies.some((n) => n.text.includes("不介入")), "feedback explains gating");
+    ok("/vision enable under vision model -> config on, tool gated, honest feedback");
+  }
+
+  // /vision status 显示门控状态(含未配置分支)
+  {
+    const { fake, ctx: ctxB } = await boot(blind, () => saveConfig({ ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" }));
+    const cmd = fake.command("vision")!;
+    await cmd.handler("status", ctxB);
+    assert.ok(ctxB.uiNotifies.some((n) => n.text.includes("已介入")));
+    const { ctx: ctxV } = await boot(vision, () => saveConfig({ ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" }));
+    await cmd.handler("status", ctxV);
+    assert.ok(ctxV.uiNotifies.some((n) => n.text.includes("未介入")));
+    const { ctx: ctxN } = await boot(vision);
+    await cmd.handler("status", ctxN);
+    assert.ok(ctxN.uiNotifies.some((n) => n.text.includes("门控") && n.text.includes("不介入")), "unconfigured status still surfaces gating");
+    ok("/vision status surfaces gating state (configured + unconfigured)");
+  }
+
+  // disable → 盲会话也不介入
+  {
+    const { fake, ctx } = await boot(blind, () => saveConfig({ ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" }));
+    const cmd = fake.command("vision")!;
+    await cmd.handler("disable", ctx);
+    assert.ok(!fake.pi.getActiveTools().includes("describe_image"));
+    ok("/vision disable keeps tool hidden in blind session");
+  }
+
+  // legacy 回退:每会话 notify 一次,且仅旧配置实际可读时通知
+  {
+    const { ctx } = await boot(blind, (dir) => {
+      fs.writeFileSync(path.join(dir, "aux-vision.json"), JSON.stringify({ ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" }));
+    });
+    const legacyNotices = ctx.uiNotifies.filter((n) => n.text.includes("旧路径"));
+    assert.strictEqual(legacyNotices.length, 1);
+    assert.match(legacyNotices[0]!.text, /aux-vision.json/);
+    ok("legacy fallback notified once per session");
+
+    // 旧文件损坏 → 不算"正在使用",不通知
+    const { ctx: ctxCorrupt } = await boot(blind, (dir) => {
+      fs.writeFileSync(path.join(dir, "aux-vision.json"), "{ not json");
+    });
+    assert.ok(!ctxCorrupt.uiNotifies.some((n) => n.text.includes("旧路径")));
+    ok("corrupt legacy file -> no legacy notice");
+  }
 }
 
 console.log(`\n${passed} tests passed`);

@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-向 Pi 注册一个 `describe_image` 原生工具:主模型(如 deepseek-v4-flash,不支持图像输入)在推理时自行决定何时调用,传入图片路径与具体问题,扩展经 pi 官方管线调用已配置的视觉模型,单次调用,结果作为 tool_result 进入上下文。
+向 Pi 注册一个 `describe_image` 原生工具:不具备图像输入的主模型(如 deepseek-v4-flash)在推理时自行决定何时调用,传入图片路径与具体问题,扩展经 pi 官方管线调用已配置的视觉模型,单次调用,结果作为 tool_result 进入上下文。具备原生读图能力的会话模型直接读图——工具只对不具备读图能力的模型可见。
 
 ## 安装
 
@@ -20,7 +20,8 @@ pi -e npm:pi-aux-vision
 
 ## 工作方式
 
-- 启动时读取 `~/.pi/agent/aux-vision.json`;无配置则自动发现第一个可用(已认证且支持图像输入)的视觉模型并写入配置;配置的模型失效时自动回退。
+- 启动时读取 `<agent-dir>/extensions/aux-vision.json`(经 pi 官方 `getAgentDir()` 解析,`PI_AGENT_DIR` 生效);0.4.0 之前的旧路径 `~/.pi/agent/aux-vision.json` 仅在新文件缺失时兜底读取,下次保存配置时自动迁移(旧文件保留不动)。无配置时,盲模型会话自动发现第一个可用(已认证且支持图像输入)的视觉模型并写入配置;配置的模型失效时自动回退。
+- 读图门控:`describe_image` 仅在「插件启用 + 辅助视觉模型已配置 + 当前会话模型不具备读图能力」时对模型可见;具备原生读图能力的模型直接读图,永远看不到该工具;可见性随模型切换与会话恢复(`model_select`)同步,并在 `/vision status` 中展示。
 - 认证、协议序列化、重试全部走 pi 官方管线(`ctx.modelRegistry.complete`),支持 google-generative-ai / openai-completions / anthropic-messages 三种协议。
 - 每次结果都以穷尽转录底座开头(图像类型、全部可见文字逐字转录、布局/顺序),再回答问题并以完整性自证句收尾——不具备图像输入的主模型可以直接从底座推理,而不只是依赖狭窄的回答。输出撞到 token 上限时,工具会在头部显式提示截断,而非静默返回残缺底座。
 - 图片上限 10MB(三家服务商限制交集);超限时用 pi 官方 `resizeImage` 自动压缩,压不动才报错。
@@ -28,7 +29,9 @@ pi -e npm:pi-aux-vision
 
 ## 配置
 
-`~/.pi/agent/aux-vision.json`:
+`<agent-dir>/extensions/aux-vision.json`(例如 `~/.pi/agent/extensions/aux-vision.json`):
+
+旧路径 `~/.pi/agent/aux-vision.json`(0.4.0 之前)仅在新文件不存在时兜底读取;新文件一旦存在即优先,且每次写入都指向新路径。
 
 ```json
 {
@@ -51,10 +54,10 @@ pi -e npm:pi-aux-vision
 
 | 命令 | 说明 |
 |---|---|
-| `/vision status` | 当前 provider/model、协议、启用状态、footer 开关 |
+| `/vision status` | 当前 provider/model、协议、启用状态、footer 开关、门控状态(describe_image 是否介入) |
 | `/vision set <provider> <model>` | 手动指定视觉模型并启用,写入配置 |
 | `/vision list` | 列出可用(已认证)的图像识别模型,标注当前 |
-| `/vision enable` / `/vision disable` | 开关;禁用后 `describe_image` 对主模型不可见 |
+| `/vision enable` / `/vision disable` | 开关;禁用后或当前模型具备原生读图能力时,`describe_image` 对模型不可见 |
 | `/vision test [path]` | 用自动生成的测试图验证全链路;可指定图片路径 |
 
 ## 工具
@@ -78,7 +81,7 @@ npm test
 node .test/build.js && node .test/test-run.mjs
 ```
 
-`.test/` 用 esbuild 将扩展模块与 pi 依赖的 mock 打包后执行,覆盖配置读写、模型发现、describe_image 成功/失败路径、测试图生成、footer 状态机与接线。
+`.test/` 用 esbuild 将扩展模块与 pi 依赖的 mock 打包后执行,覆盖配置读写(规范/旧版路径)、模型发现、describe_image 成功/失败路径、测试图生成、footer 状态机与接线、读图门控。
 
 ## License
 
