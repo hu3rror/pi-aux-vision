@@ -128,11 +128,16 @@ export class Text {
 }
 
 // ---- ExtensionAPI 桩:捕获工具/命令注册与事件处理器,供接线测试驱动 ----
+// 模拟 pi 0.99+ 的加载守卫:扩展加载期调用动作方法(getActiveTools/setActiveTools 等)
+// 会抛 "Extension runtime not initialized",与真实运行时一致;markReady() 模拟运行时就绪。
+const LOADING_ERROR = "Extension runtime not initialized. Action methods cannot be called during extension loading.";
+
 export function makeFakePi() {
   const tools = new Map<string, unknown>();
   const commands = new Map<string, unknown>();
   const events = new Map<string, ((event: unknown, ctx: unknown) => Promise<void> | void)[]>();
   let activeTools: string[] = [];
+  let ready = false;
   return {
     pi: {
       registerTool: (def: { name: string }) => {
@@ -146,10 +151,18 @@ export function makeFakePi() {
         list.push(cb);
         events.set(event, list);
       },
-      getActiveTools: () => activeTools,
+      getActiveTools: () => {
+        if (!ready) throw new Error(LOADING_ERROR);
+        return activeTools;
+      },
       setActiveTools: (t: string[]) => {
+        if (!ready) throw new Error(LOADING_ERROR);
         activeTools = [...t];
       },
+    },
+    /** 模拟运行时就绪:扩展加载完成后调用,动作方法才可用。 */
+    markReady() {
+      ready = true;
     },
     tool: (name: string) => tools.get(name) as { execute: (...args: unknown[]) => Promise<MockToolResult> } | undefined,
     command: (name: string) => commands.get(name) as { handler: (...args: unknown[]) => Promise<void> | void } | undefined,

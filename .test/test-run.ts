@@ -408,6 +408,7 @@ function ok(name: string) {
 
   const fake = makeFakePi();
   extension(fake.pi as never);
+  fake.markReady();
 
   const ctx = makeFakeCtx();
   await fake.fire("session_start", {}, ctx);
@@ -475,6 +476,7 @@ function ok(name: string) {
 
   const fake = makeFakePi();
   extension(fake.pi as never);
+  fake.markReady();
   const ctx = makeFakeCtx();
   await fake.fire("session_start", {}, ctx);
 
@@ -512,16 +514,29 @@ function ok(name: string) {
     setTestAgentDir(dir);
     const fake = makeFakePi();
     extension(fake.pi as never);
+    fake.markReady();
     setup?.(dir);
     const ctx = makeFakeCtx(undefined, model as never);
     await fake.fire("session_start", {}, ctx);
     return { fake, ctx, dir };
   }
 
+  // 加载期不得调用动作方法(回归):pi 0.99+ 在扩展加载阶段禁止 getActiveTools/setActiveTools
+  {
+    const fake = makeFakePi();
+    assert.doesNotThrow(
+      () => extension(fake.pi as never),
+      "extension factory must not call action methods during loading",
+    );
+    assert.ok(fake.tool("describe_image"), "tool registered at load");
+    ok("extension loads without calling action methods (loading guard)");
+  }
+
   // 加载即注册,但不激活:门控批准前不进入模型可见集合
   {
     const fake = makeFakePi();
     extension(fake.pi as never);
+    fake.markReady();
     assert.ok(fake.tool("describe_image"), "tool registered at load");
     assert.deepStrictEqual(fake.pi.getActiveTools(), []);
     ok("tool registered inactive at load");

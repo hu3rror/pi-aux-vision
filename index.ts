@@ -21,9 +21,9 @@ export default function (pi: ExtensionAPI) {
   // footer controller:状态与 footer key 收在闭包,事件点一行转发
   const footer = createFooterController();
 
-  // 加载即注册并保持不介入:可见性完全由门控在会话/模型事件中决定(ADR-0004)
+  // 加载期只做注册:动作方法(getActiveTools/setActiveTools)在扩展加载阶段被 pi 禁止,
+  // 可见性完全由门控在 session_start/model_select 中决定(ADR-0004)
   registerToolOnce();
-  ensureToolActive(false);
 
   /** 差分控制 describe_image 在当前会话的可见性,不动其他工具。 */
   function ensureToolActive(active: boolean) {
