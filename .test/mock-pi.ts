@@ -187,7 +187,7 @@ export const Type = {
   Union: (anyOf: unknown[]) => ({ kind: "Union", anyOf }),
 };
 
-// 契约校验(切片:outputSchema 与 structuredContent 一致性):non-strict 语义,额外属性忽略。
+// 契约校验(ADR-0005):outputSchema 与 structuredContent 一致性;non-strict 语义,额外属性忽略。
 export const Value = {
   Check: (schema: any, value: unknown): boolean => {
     switch (schema?.kind) {

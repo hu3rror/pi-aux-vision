@@ -18,6 +18,27 @@ function ok(name: string) {
   console.log(`  PASS ${name}`);
 }
 
+/** 截断路径共用的 mock 响应:stopReason "length" 触发 ADR-0002 显式化。 */
+function truncatedAssistantResponse() {
+  return {
+    role: "assistant",
+    content: [{ type: "text", text: "部分转录…" }],
+    api: "openai-completions",
+    provider: "mock",
+    model: "mock",
+    stopReason: "length" as const,
+    timestamp: Date.now(),
+    usage: {
+      input: 10,
+      output: 20,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 30,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+  };
+}
+
 // ---- 1. 配置往返与路径解析(ADR-0003:写入规范路径,旧路径仅缺失时兜底)----
 {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aux-vision-cfg-"));
@@ -152,23 +173,7 @@ function ok(name: string) {
 
 // ---- 5c. 截断显式化(ADR-0002):stopReason "length" → 头部显式提示,不静默截断 ----
 {
-  const ctx = makeFakeCtx(async () => ({
-    role: "assistant",
-    content: [{ type: "text", text: "部分转录…" }],
-    api: "openai-completions",
-    provider: "mock",
-    model: "mock",
-    stopReason: "length" as const,
-    timestamp: Date.now(),
-    usage: {
-      input: 10,
-      output: 20,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 30,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-    },
-  }));
+  const ctx = makeFakeCtx(truncatedAssistantResponse);
   const cfg = { ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" };
   const model = findConfiguredModel(ctx, cfg.provider, cfg.model)!;
   const res = await describeImage({ image_path: writePng("trunc.png"), question: "?" }, ctx, model, cfg, undefined);
@@ -203,23 +208,7 @@ function ok(name: string) {
 
 // ---- 5e. 结构化结果:截断路径 truncated=true,转录含显式提示(ADR-0002/0005) ----
 {
-  const ctx = makeFakeCtx(async () => ({
-    role: "assistant",
-    content: [{ type: "text", text: "部分转录…" }],
-    api: "openai-completions",
-    provider: "mock",
-    model: "mock",
-    stopReason: "length" as const,
-    timestamp: Date.now(),
-    usage: {
-      input: 10,
-      output: 20,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 30,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-    },
-  }));
+  const ctx = makeFakeCtx(truncatedAssistantResponse);
   const cfg = { ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" };
   const model = findConfiguredModel(ctx, cfg.provider, cfg.model)!;
   const res = await describeImage({ image_path: writePng("sc-trunc.png"), question: "?" }, ctx, model, cfg, undefined);
@@ -244,23 +233,14 @@ function ok(name: string) {
   ok("structured result: failure carries ok=false + error, no isError");
 }
 
-// ---- 5g. 结构化契约一致性:outputSchema 与返回值不漂移(切片 4) ----
+// ---- 5g. 结构化契约一致性:outputSchema 与返回值不漂移(ADR-0005) ----
 {
   const ctx = makeFakeCtx();
   const cfg = { ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" };
   const model = findConfiguredModel(ctx, cfg.provider, cfg.model)!;
   const okRes = await describeImage({ image_path: writePng("schema-ok.png"), question: "?" }, ctx, model, cfg, undefined);
   assert.ok(Value.Check(structuredOutputSchema, okRes.structuredContent), "success structuredContent matches declared outputSchema");
-  const truncCtx = makeFakeCtx(async () => ({
-    role: "assistant",
-    content: [{ type: "text", text: "部分转录…" }],
-    api: "openai-completions",
-    provider: "mock",
-    model: "mock",
-    stopReason: "length" as const,
-    timestamp: Date.now(),
-    usage: { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 30, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-  }));
+  const truncCtx = makeFakeCtx(truncatedAssistantResponse);
   const truncRes = await describeImage({ image_path: writePng("schema-trunc.png"), question: "?" }, truncCtx, model, cfg, undefined);
   assert.ok(Value.Check(structuredOutputSchema, truncRes.structuredContent), "truncated structuredContent matches declared outputSchema");
   const failRes = await describeImage({ image_path: tmpfile("schema-nope.png"), question: "?" }, ctx, model, cfg, undefined);
