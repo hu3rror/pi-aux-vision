@@ -172,10 +172,44 @@ export function makeFakePi() {
   };
 }
 
-// ---- typebox mock(esbuild 打包时替换)----
+// ---- typebox mock(esbuild 打包时替换):最小 schema 构造 + 校验语义 ----
 export const Type = {
-  Object: (props: Record<string, unknown>) => ({ type: "object", properties: props }),
-  String: (opts?: unknown) => ({ type: "string", ...(opts as object) }),
+  Object: (properties: Record<string, unknown>, opts?: { additionalProperties?: boolean }) => ({
+    kind: "Object",
+    properties,
+    ...(opts ?? {}),
+  }),
+  String: (opts?: unknown) => ({ kind: "String", ...(opts as object) }),
+  Number: () => ({ kind: "Number" }),
+  Boolean: () => ({ kind: "Boolean" }),
+  Literal: (value: unknown) => ({ kind: "Literal", value }),
+  Optional: (value: unknown) => ({ kind: "Optional", value }),
+  Union: (anyOf: unknown[]) => ({ kind: "Union", anyOf }),
+};
+
+// 契约校验(切片:outputSchema 与 structuredContent 一致性):non-strict 语义,额外属性忽略。
+export const Value = {
+  Check: (schema: any, value: unknown): boolean => {
+    switch (schema?.kind) {
+      case "Object":
+        if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+        return Object.entries(schema.properties).every(([k, sub]) => Value.Check(sub, (value as Record<string, unknown>)[k]));
+      case "String":
+        return typeof value === "string";
+      case "Number":
+        return typeof value === "number";
+      case "Boolean":
+        return typeof value === "boolean";
+      case "Literal":
+        return value === schema.value;
+      case "Optional":
+        return value === undefined || Value.Check(schema.value, value);
+      case "Union":
+        return schema.anyOf.some((s: any) => Value.Check(s, value));
+      default:
+        return false;
+    }
+  },
 };
 
 export const tmpfile = (name: string) => path.join(os.tmpdir(), name);

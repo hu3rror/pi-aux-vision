@@ -36,8 +36,8 @@ Configuration produced by releases ≤0.3.0, honored only while no canonical con
 _Avoid_: 迁移命令(不存在这样的命令)
 
 **tool result contract / 工具结果契约**:
-The shape of the `details` field every `describe_image` result carries: `{ model, usage }` on success, `{ error: string }` on expected failure. Expected failures are returned with the error text in `content`, never signaled by throwing (see ADR-0001).
-_Avoid_: throw-based error signaling
+The shape of the `details` field every `describe_image` result carries: `{ model, usage }` on success, `{ error: string }` on expected failure. Expected failures are returned with the error text in `content`, never signaled by throwing (see ADR-0001). Since the tool declares an `outputSchema`, codemode scripts receive the machine-readable `structuredContent` instead of the text: `{ ok, model, usage, transcription, truncated, resize_note? }` on success, `{ ok: false, error }` on failure (see ADR-0005). The `transcription` string duplicates the `content` text so a script can drop it before returning a summary; direct calls still read `content` and never see the structured fields.
+_Avoid_: throw-based error signaling, script-side text parsing
 
 **transcription base / 转录底座**:
 The exhaustive dump every `describe_image` result must begin with, regardless of the question: image-type classification, verbatim transcription of all visible text (untranslated), and layout/reading order. A non-visual main model reasons from this base, so its completeness must not depend on how precisely the question was asked (see ADR-0002).

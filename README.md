@@ -83,9 +83,36 @@ Manual: drop the `pi-aux-vision/` directory under `~/.pi/agent/extensions/`, the
 
 The vision model answers in the language of the question. Errors (file not found, unsupported format, call failure) return as structured text for the main model to handle — no confirmation dialogs.
 
+### Codemode scripts
+
+The tool declares an `outputSchema`, so [codemode](https://github.com/earendil-works/pi-coding-agent) scripts receive a machine-readable `structuredContent` instead of the text: `{ ok, model, usage, transcription, truncated, resize_note? }` on success, `{ ok: false, error }` on expected failure. That lets a script batch-call `describe_image` in parallel, filter by `ok` / `truncated` / `error`, and keep the transcription base entirely inside the script, returning only a summary to the main model:
+
+```js
+// @options: {"timeout_ms": 300000}
+const files = ["/tmp/shot-a.png", "/tmp/shot-b.png", "/tmp/shot-c.png"];
+const results = await Promise.allSettled(
+  files.map((f) =>
+    tools.describe_image({
+      image_path: f,
+      question: "Extract every error message verbatim. If there is none, say OK.",
+    }),
+  ),
+);
+const summary = results.map((r, i) => {
+  if (r.status === "rejected") return { image: files[i], error: String(r.reason) };
+  if (!r.value.ok) return { image: files[i], error: r.value.error };
+  return { image: files[i], truncated: r.value.truncated, transcription_chars: r.value.transcription.length };
+});
+return { failed: summary.filter((s) => s.error).length, items: summary };
+```
+
+The example deliberately does not parse the transcription text — the tool's contract keeps it a plain string (ADR-0005), so scripts rely on the programmatic fields (`ok`, `error`, `truncated`, `usage`) and drop the text. When you need the actual answer for one image, call `describe_image` on it directly; the transcription then enters the main model's context as the model's deliberate choice.
+
+This capability is **dormant until codemode is enabled** — add `"codemode"` to `defaultTools` in your pi settings (`~/.pi/agent/settings.json`), e.g. `"defaultTools": ["+codemode"]`. Without it, the tool, its gating, and its error contract behave exactly as before; the structured fields simply have no consumer.
+
 ## Compatibility
 
-Verified against pi `0.86.0` (2026-09-19). The peer dependency range stays `"*"`; the source type-checks against the current SDK via `npm run typecheck`.
+Verified against pi `1.0.0`. The peer dependency range stays `"*"`; the source type-checks against the current SDK via `npm run typecheck`. Structured results (`outputSchema`) and codemode require pi `1.0.0+`; on older pi versions the tool falls back to its text-only contract.
 
 ## Development
 

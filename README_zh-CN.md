@@ -83,9 +83,36 @@ pi -e npm:pi-aux-vision
 
 视觉模型以提问原语言作答。错误(文件不存在、格式不支持、调用失败)以结构化文本返回,由主模型自行处理,不弹确认框。
 
+### Codemode 脚本
+
+工具声明了 `outputSchema`,因此 [codemode](https://github.com/earendil-works/pi-coding-agent) 脚本收到的是机器可读的 `structuredContent` 而非文本:成功为 `{ ok, model, usage, transcription, truncated, resize_note? }`,预期失败为 `{ ok: false, error }`。脚本可以并行批量调用 `describe_image`,按 `ok` / `truncated` / `error` 过滤,让转录底座完全留在脚本内,只把摘要回给主模型:
+
+```js
+// @options: {"timeout_ms": 300000}
+const files = ["/tmp/shot-a.png", "/tmp/shot-b.png", "/tmp/shot-c.png"];
+const results = await Promise.allSettled(
+  files.map((f) =>
+    tools.describe_image({
+      image_path: f,
+      question: "Extract every error message verbatim. If there is none, say OK.",
+    }),
+  ),
+);
+const summary = results.map((r, i) => {
+  if (r.status === "rejected") return { image: files[i], error: String(r.reason) };
+  if (!r.value.ok) return { image: files[i], error: r.value.error };
+  return { image: files[i], truncated: r.value.truncated, transcription_chars: r.value.transcription.length };
+});
+return { failed: summary.filter((s) => s.error).length, items: summary };
+```
+
+示例刻意不做转录文本解析——工具契约让转录保持为普通字符串字段(ADR-0005),脚本只依赖程序字段(`ok` / `error` / `truncated` / `usage`)并丢弃文本。需要某张图的实际答案时,直接对该图调用 `describe_image`;此时转录进入主模型上下文,是主模型自己的选择。
+
+该能力在**未启用 codemode 时静默不生效**——需在 pi 设置(`~/.pi/agent/settings.json`)的 `defaultTools` 中加入 `"codemode"`,例如 `"defaultTools": ["+codemode"]`。未启用时,工具、门控与错误契约与先前完全一致;结构化字段只是没有消费者。
+
 ## 兼容性
 
-已针对 pi `0.86.0`(2026-09-19)验证。peer dependency 范围仍为 `"*"`;源码通过 `npm run typecheck` 对当前 SDK 进行类型检查。
+已针对 pi `1.0.0` 验证。peer dependency 范围仍为 `"*"`;源码通过 `npm run typecheck` 对当前 SDK 进行类型检查。结构化结果(`outputSchema`)与 codemode 需要 pi `1.0.0+`;在旧版 pi 上工具回退为纯文本契约。
 
 ## 开发
 

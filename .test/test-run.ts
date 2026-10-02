@@ -5,7 +5,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { loadConfig, saveConfig, DEFAULT_CONFIG, type AuxVisionConfig } from "../config";
 import { findConfiguredModel, findFirstVisionModel, formatModelDescription, formatProviderDescription, groupVisionProviders, isVisionModel, listVisionModels, resolveVisionCandidates } from "../discovery";
-import { describeImage } from "../vision";
+import { describeImage, structuredOutputSchema } from "../vision";
+import { Value } from "typebox";
 import { generateTestImage } from "../test-image";
 import { INITIAL_FOOTER_STATE, colorFooter, footerParts, footerStatus, projectFooterConfig, reduceFooter, renderFooter } from "../footer";
 import { createFooterController } from "../footer-controller";
@@ -183,6 +184,88 @@ function ok(name: string) {
   const resZh = await describeImage({ image_path: writePng("trunc-zh.png"), question: "图里是什么?" }, ctx, model, cfg, undefined);
   assert.match(resZh.content[0].text, /token limit/);
   ok("truncation notice is fixed English regardless of question language");
+}
+
+// ---- 5d. 结构化结果(codemode 契约):脚本侧收到 structuredContent 而非文本 - 成功路径 ----
+{
+  const ctx = makeFakeCtx();
+  const cfg = { ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" };
+  const model = findConfiguredModel(ctx, cfg.provider, cfg.model)!;
+  const res = await describeImage({ image_path: writePng("sc-ok.png"), question: "?" }, ctx, model, cfg, undefined);
+  assert.ok(!("error" in res.details), "success result has no error marker");
+  assert.strictEqual(res.structuredContent.ok, true, "structured success carries ok=true");
+  assert.strictEqual(res.structuredContent.model, "sensenova-anthropic/sensenova-6.8-flash-lite");
+  assert.strictEqual(res.structuredContent.usage.totalTokens, 30);
+  assert.strictEqual(res.structuredContent.truncated, false);
+  assert.strictEqual(res.structuredContent.transcription, res.content[0].text, "transcription equals content text");
+  ok("structured result: success carries ok/model/usage/truncated/transcription");
+}
+
+// ---- 5e. 结构化结果:截断路径 truncated=true,转录含显式提示(ADR-0002/0005) ----
+{
+  const ctx = makeFakeCtx(async () => ({
+    role: "assistant",
+    content: [{ type: "text", text: "部分转录…" }],
+    api: "openai-completions",
+    provider: "mock",
+    model: "mock",
+    stopReason: "length" as const,
+    timestamp: Date.now(),
+    usage: {
+      input: 10,
+      output: 20,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 30,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+  }));
+  const cfg = { ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" };
+  const model = findConfiguredModel(ctx, cfg.provider, cfg.model)!;
+  const res = await describeImage({ image_path: writePng("sc-trunc.png"), question: "?" }, ctx, model, cfg, undefined);
+  assert.strictEqual(res.structuredContent.ok, true);
+  assert.strictEqual(res.structuredContent.truncated, true, "truncation flagged programmatically");
+  assert.strictEqual(res.structuredContent.transcription, res.content[0].text);
+  assert.match(res.structuredContent.transcription, /token limit/);
+  ok("structured result: truncation carries truncated=true with notice in transcription");
+}
+
+// ---- 5f. 结构化结果:失败路径 ok=false + error,结果仍不携带 isError(ADR-0001/0005) ----
+{
+  const ctx = makeFakeCtx();
+  const cfg = { ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" };
+  const model = findConfiguredModel(ctx, cfg.provider, cfg.model)!;
+  const res = await describeImage({ image_path: tmpfile("sc-nope.png"), question: "?" }, ctx, model, cfg, undefined);
+  assert.ok("error" in res.details, "failure carries error marker");
+  assert.strictEqual(res.structuredContent.ok, false, "structured failure carries ok=false");
+  assert.strictEqual(res.structuredContent.error, res.details.error);
+  assert.match(res.structuredContent.error, /does not exist/);
+  assert.ok(!("isError" in res), "failure result carries no isError field (ADR-0001)");
+  ok("structured result: failure carries ok=false + error, no isError");
+}
+
+// ---- 5g. 结构化契约一致性:outputSchema 与返回值不漂移(切片 4) ----
+{
+  const ctx = makeFakeCtx();
+  const cfg = { ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" };
+  const model = findConfiguredModel(ctx, cfg.provider, cfg.model)!;
+  const okRes = await describeImage({ image_path: writePng("schema-ok.png"), question: "?" }, ctx, model, cfg, undefined);
+  assert.ok(Value.Check(structuredOutputSchema, okRes.structuredContent), "success structuredContent matches declared outputSchema");
+  const truncCtx = makeFakeCtx(async () => ({
+    role: "assistant",
+    content: [{ type: "text", text: "部分转录…" }],
+    api: "openai-completions",
+    provider: "mock",
+    model: "mock",
+    stopReason: "length" as const,
+    timestamp: Date.now(),
+    usage: { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 30, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+  }));
+  const truncRes = await describeImage({ image_path: writePng("schema-trunc.png"), question: "?" }, truncCtx, model, cfg, undefined);
+  assert.ok(Value.Check(structuredOutputSchema, truncRes.structuredContent), "truncated structuredContent matches declared outputSchema");
+  const failRes = await describeImage({ image_path: tmpfile("schema-nope.png"), question: "?" }, ctx, model, cfg, undefined);
+  assert.ok(Value.Check(structuredOutputSchema, failRes.structuredContent), "failure structuredContent matches declared outputSchema");
+  ok("outputSchema/structuredContent consistency: success, truncation, failure");
 }
 
 // ---- 6. 测试图生成(真实 PowerShell) ----

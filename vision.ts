@@ -8,6 +8,7 @@ import type { Api, AssistantMessage, Model, TextContent, Usage } from "@earendil
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { AuxVisionConfig } from "./config";
+import { Type } from "typebox";
 
 /** 服务商限制交集:原始图片 10MB 硬上限(Gemini 20MB 请求 / Anthropic 10MB / SenseNova 10MB)。 */
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -27,21 +28,70 @@ const SYSTEM_PROMPT =
 
 // Tool result contract (ADR-0001): success carries { model, usage }, failure { error }.
 // Expected failures are returned, not thrown, so the transcript isError stays false.
+// Structured result (ADR-0005): codemode scripts receive structuredContent once outputSchema is declared.
+// usage is a JSON-safe type alias (interface types fail the SDK's JsonValue constraint, ADR-0005).
+export type UsageJson = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cacheWrite1h?: number;
+  reasoning?: number;
+  totalTokens: number;
+  cost: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
+};
+
 export type DescribeImageResult =
-  | { content: { type: "text"; text: string }[]; details: { model: string; usage: Usage } }
-  | { content: { type: "text"; text: string }[]; details: { error: string } };
+  | {
+      content: { type: "text"; text: string }[];
+      details: { model: string; usage: Usage };
+      structuredContent: {
+        ok: true;
+        model: string;
+        usage: UsageJson;
+        transcription: string;
+        truncated: boolean;
+        resize_note?: string;
+      };
+    }
+  | {
+      content: { type: "text"; text: string }[];
+      details: { error: string };
+      structuredContent: { ok: false; error: string };
+    };
 
 /** Narrow a describe_image result to its expected-failure variant. */
 export function isErrorResult(r: DescribeImageResult): r is Extract<DescribeImageResult, { details: { error: string } }> {
   return "error" in r.details;
 }
 
-function errorResult(text: string): { content: { type: "text"; text: string }[]; details: { error: string } } {
+export function errorResult(text: string): {
+  content: { type: "text"; text: string }[];
+  details: { error: string };
+  structuredContent: { ok: false; error: string };
+} {
   return {
     content: [{ type: "text" as const, text }],
     details: { error: text },
+    structuredContent: { ok: false, error: text },
   };
 }
+
+// 结构化输出契约(ADR-0005):转录保持普通字符串字段,脚本可弃;usage 仅承诺 totalTokens。
+export const structuredOutputSchema = Type.Union([
+  Type.Object({
+    ok: Type.Literal(true),
+    model: Type.String(),
+    usage: Type.Object({ totalTokens: Type.Number() }, { additionalProperties: true }),
+    transcription: Type.String(),
+    truncated: Type.Boolean(),
+    resize_note: Type.Optional(Type.String()),
+  }),
+  Type.Object({
+    ok: Type.Literal(false),
+    error: Type.String(),
+  }),
+]);
 
 /**
  * 核心图像分析:读盘 → 校验/压缩 → 经 modelRegistry 官方管线调用视觉模型 → 返回文本结果。
@@ -139,14 +189,23 @@ export async function describeImage(
 
   // 截断显式化(ADR-0002):SDK 在输出撞到 maxTokens 时标记 stopReason "length",
   // 此时转录底座可能不完整,必须在头部显式告知,而不是把残缺底座静默交回盲模型。
-  const body =
-    result.stopReason === "length" ? `${truncationNotice()}\n${text}` : text;
+  const truncated = result.stopReason === "length";
+  const body = truncated ? `${truncationNotice()}\n${text}` : text;
+  const fullText = resizeNote ? `${body}\n${resizeNote}` : body;
 
   return {
-    content: [{ type: "text", text: resizeNote ? `${body}\n${resizeNote}` : body }],
+    content: [{ type: "text", text: fullText }],
     details: {
       model: `${model.provider}/${model.id}`,
       usage: result.usage,
+    },
+    structuredContent: {
+      ok: true,
+      model: `${model.provider}/${model.id}`,
+      usage: result.usage,
+      transcription: fullText,
+      truncated,
+      ...(resizeNote ? { resize_note: resizeNote } : {}),
     },
   };
 }

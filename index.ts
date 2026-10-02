@@ -4,7 +4,7 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { DEFAULT_CONFIG, legacyConfigPath, loadConfig, resolveConfigFile, saveConfig, type AuxVisionConfig } from "./config";
 import { findConfiguredModel, findFirstVisionModel, formatContextWindow, formatModelDescription, formatProviderDescription, groupVisionProviders, isVisionModel, listVisionModels, resolveVisionCandidates } from "./discovery";
-import { describeImage, isErrorResult, type DescribeImageResult } from "./vision";
+import { describeImage, errorResult, isErrorResult, structuredOutputSchema, type DescribeImageResult } from "./vision";
 import { generateTestImage } from "./test-image";
 import { createFooterController } from "./footer-controller";
 
@@ -72,6 +72,7 @@ export default function (pi: ExtensionAPI) {
           description: "The specific question to answer about the image content",
         }),
       }),
+      outputSchema: structuredOutputSchema,
       async execute(_toolCallId, params, signal, _onUpdate, ctx) {
         const result = await runDescribe(params, ctx, signal);
         // 任何调用(含失败)都算触发:footer 显示模型并保持到会话结束
@@ -91,18 +92,12 @@ export default function (pi: ExtensionAPI) {
     if (!cfg || !cfg.enabled || !cfg.provider || !cfg.model) {
       const text =
         "aux-vision plugin is not enabled. Run /vision status for details, or /vision set <provider> <model> to configure a vision model.";
-      return {
-        content: [{ type: "text", text }],
-        details: { error: text },
-      };
+      return errorResult(text);
     }
     const model = findConfiguredModel(ctx, cfg.provider, cfg.model);
     if (!model) {
       const text = `The configured vision model ${cfg.provider}/${cfg.model} is unavailable (not found or not authenticated). Run /vision list to see available models.`;
-      return {
-        content: [{ type: "text", text }],
-        details: { error: text },
-      };
+      return errorResult(text);
     }
     return describeImage(params, ctx, model, cfg, signal);
   }
