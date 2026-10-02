@@ -686,9 +686,9 @@ function ok(name: string) {
   const cur = cmd.getArgumentCompletions("set ") ?? [];
   assert.strictEqual(cur[0]?.value, "set google gemini-3.1-flash-lite", "current selection first");
   assert.strictEqual(cur[0]?.label, "● google/gemini-3.1-flash-lite", "current selection highlighted in label");
-  assert.ok(!cur.some((i) => i.description?.includes("current")), "no current tag in description");
+  assert.match(cur[0]?.description ?? "", /← current/, "current tag back in description tail");
   assert.ok(cur.some((i) => i.label === "sensenova-anthropic/sensenova-6.8-flash-lite"), "non-current label unprefixed");
-  ok("set completion highlights current selection first with leading bullet");
+  ok("set completion highlights current selection first with leading bullet + trailing tag");
 
   // session_start 前(registry 未缓存)→ 空补全
   const fake0 = makeFakePi();
@@ -769,8 +769,8 @@ function ok(name: string) {
     const n = ctx.uiNotifies.at(-1)!;
     assert.match(
       n.text,
-      /sensenova-anthropic\/sensenova-6\.8-flash-lite\n● google\/gemini-3\.1-flash-lite/,
-      "current line marked with leading bullet",
+      /sensenova-anthropic\/sensenova-6\.8-flash-lite\n● google\/gemini-3\.1-flash-lite ← current/,
+      "current line marked with leading bullet + trailing tag",
     );
     ok("/vision list marks the current line with a leading bullet");
   }

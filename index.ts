@@ -239,11 +239,12 @@ export default function (pi: ExtensionAPI) {
       })
       .map((m) => {
         const label = `${m.provider}/${m.id}`;
+        const isCurrent = label === currentKey;
         return {
           value: `set ${m.provider} ${m.id}`,
-          // 当前选择用 label 前导 ● 标注:description 右对齐、窄屏截断且 muted,放尾部不可见
-          label: label === currentKey ? `● ${label}` : label,
-          description: formatModelDescription(m, true),
+          // 当前选择:label 前导 ●(定位)+ description 尾部 ← current(语义),双标记
+          label: isCurrent ? `● ${label}` : label,
+          description: `${formatModelDescription(m, true)}${isCurrent ? " · ← current" : ""}`,
         };
       });
   }
@@ -372,8 +373,8 @@ export default function (pi: ExtensionAPI) {
           const current = cfg ? `${cfg.provider}/${cfg.model}` : "";
           const lines = models.map((m) => {
             const key = `${m.provider}/${m.id}`;
-            // 当前行用前导 ● 标注:行首左缘最显眼,尾部标记会融入模型名
-            return key === current ? `● ${key}` : key;
+            // 当前行:前导 ● 定位 + 尾部 ← current 语义,双标记
+            return key === current ? `● ${key} ← current` : key;
           });
           ctx.ui.notify(`Available vision models:\n${lines.join("\n")}`, "info");
           return;
