@@ -681,14 +681,14 @@ function ok(name: string) {
   assert.strictEqual((cmd.getArgumentCompletions("set google gemini-2") ?? []).length, 0);
   ok("set completion excludes unauthenticated models");
 
-  // 当前配置的模型用前导 ● 标注在 label;description 不再带尾部标记
+  // 当前配置的模型用前导 ● 标注在 label 且排到列表首位;description 不再带尾部标记
   saveConfig({ ...DEFAULT_CONFIG, provider: "google", model: "gemini-3.1-flash-lite" });
   const cur = cmd.getArgumentCompletions("set ") ?? [];
-  const curItem = cur.find((i) => i.label === "● google/gemini-3.1-flash-lite");
-  assert.ok(curItem, "current selection highlighted in label");
+  assert.strictEqual(cur[0]?.value, "set google gemini-3.1-flash-lite", "current selection first");
+  assert.strictEqual(cur[0]?.label, "● google/gemini-3.1-flash-lite", "current selection highlighted in label");
   assert.ok(!cur.some((i) => i.description?.includes("current")), "no current tag in description");
   assert.ok(cur.some((i) => i.label === "sensenova-anthropic/sensenova-6.8-flash-lite"), "non-current label unprefixed");
-  ok("set completion highlights current selection in the label");
+  ok("set completion highlights current selection first with leading bullet");
 
   // session_start 前(registry 未缓存)→ 空补全
   const fake0 = makeFakePi();
@@ -760,6 +760,19 @@ function ok(name: string) {
     assert.match(n.text, /no vision model configured/);
     assert.strictEqual(n.level, "warning");
     ok("bare /vision warns when enabled but provider/model unset");
+  }
+  // /vision list:当前行前导 ● 标注,其余行不带标记(顺序保持 registry)
+  {
+    const blind = { provider: "sensenova", id: "deepseek-v4-flash", api: "openai-completions", input: ["text"], contextWindow: 1048576, maxTokens: 65536 };
+    const { fake, ctx } = await bootStatus(blind, () => saveConfig({ ...DEFAULT_CONFIG, provider: "google", model: "gemini-3.1-flash-lite" }));
+    await (fake.command("vision")! as never as { handler(a: string, c: unknown): Promise<unknown> }).handler("list", ctx);
+    const n = ctx.uiNotifies.at(-1)!;
+    assert.match(
+      n.text,
+      /sensenova-anthropic\/sensenova-6\.8-flash-lite\n● google\/gemini-3\.1-flash-lite/,
+      "current line marked with leading bullet",
+    );
+    ok("/vision list marks the current line with a leading bullet");
   }
 }
 

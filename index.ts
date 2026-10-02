@@ -231,6 +231,12 @@ export default function (pi: ExtensionAPI) {
       .filter(isVisionModel)
       .filter((m) => m.provider.startsWith(providerPart))
       .filter((m) => !modelPart || m.id.startsWith(modelPart))
+      // 当前选择排首位:补全打开即见,且默认高亮行(accent 配色)落在它身上
+      .sort((a, b) => {
+        const keyA = `${a.provider}/${a.id}` === currentKey ? 0 : 1;
+        const keyB = `${b.provider}/${b.id}` === currentKey ? 0 : 1;
+        return keyA - keyB;
+      })
       .map((m) => {
         const label = `${m.provider}/${m.id}`;
         return {
@@ -365,8 +371,9 @@ export default function (pi: ExtensionAPI) {
           const cfg = loadConfig();
           const current = cfg ? `${cfg.provider}/${cfg.model}` : "";
           const lines = models.map((m) => {
-            const tag = `${m.provider}/${m.id}` === current ? " ● current" : "";
-            return `${m.provider}/${m.id}${tag}`;
+            const key = `${m.provider}/${m.id}`;
+            // 当前行用前导 ● 标注:行首左缘最显眼,尾部标记会融入模型名
+            return key === current ? `● ${key}` : key;
           });
           ctx.ui.notify(`Available vision models:\n${lines.join("\n")}`, "info");
           return;
