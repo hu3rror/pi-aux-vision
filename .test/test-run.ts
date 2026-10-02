@@ -681,12 +681,14 @@ function ok(name: string) {
   assert.strictEqual((cmd.getArgumentCompletions("set google gemini-2") ?? []).length, 0);
   ok("set completion excludes unauthenticated models");
 
-  // 当前配置的模型标注 ← current
+  // 当前配置的模型用前导 ● 标注在 label;description 不再带尾部标记
   saveConfig({ ...DEFAULT_CONFIG, provider: "google", model: "gemini-3.1-flash-lite" });
   const cur = cmd.getArgumentCompletions("set ") ?? [];
-  const curItem = cur.find((i) => i.label === "google/gemini-3.1-flash-lite");
-  assert.ok(curItem?.description?.includes("current"), "current selection marked");
-  ok("set completion marks current selection");
+  const curItem = cur.find((i) => i.label === "● google/gemini-3.1-flash-lite");
+  assert.ok(curItem, "current selection highlighted in label");
+  assert.ok(!cur.some((i) => i.description?.includes("current")), "no current tag in description");
+  assert.ok(cur.some((i) => i.label === "sensenova-anthropic/sensenova-6.8-flash-lite"), "non-current label unprefixed");
+  ok("set completion highlights current selection in the label");
 
   // session_start 前(registry 未缓存)→ 空补全
   const fake0 = makeFakePi();
@@ -719,6 +721,7 @@ function ok(name: string) {
     await (fake.command("vision")! as never as { handler(a: string, c: unknown): Promise<unknown> }).handler("", ctx);
     const n = ctx.uiNotifies.at(-1)!;
     assert.match(n.text, /Usage:/);
+    assert.match(n.text, /─{10,}/, "divider between usage and status");
     assert.match(n.text, /enabled \| google\/gemini-3\.1-flash-lite/);
     assert.match(n.text, /Gating:/);
     assert.strictEqual(n.level, "info");

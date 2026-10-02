@@ -13,6 +13,8 @@ import { pickFromList } from "./ui";
 const TOOL_NAME = "describe_image";
 const TEST_QUESTION =
   "Describe this test image: repeat all visible text, and state which colors the red, blue, and green blocks are.";
+/** 用法与状态的分隔线:notify 为纯文本渲染,markdown 分隔符不生效。 */
+const STATUS_DIVIDER = "─".repeat(60);
 
 export default function (pi: ExtensionAPI) {
   let toolRegistered = false;
@@ -230,11 +232,12 @@ export default function (pi: ExtensionAPI) {
       .filter((m) => m.provider.startsWith(providerPart))
       .filter((m) => !modelPart || m.id.startsWith(modelPart))
       .map((m) => {
-        const tag = `${m.provider}/${m.id}` === currentKey ? " · ← current" : "";
+        const label = `${m.provider}/${m.id}`;
         return {
           value: `set ${m.provider} ${m.id}`,
-          label: `${m.provider}/${m.id}`,
-          description: `${formatModelDescription(m, true)}${tag}`,
+          // 当前选择用 label 前导 ● 标注:description 右对齐、窄屏截断且 muted,放尾部不可见
+          label: label === currentKey ? `● ${label}` : label,
+          description: formatModelDescription(m, true),
         };
       });
   }
@@ -362,7 +365,7 @@ export default function (pi: ExtensionAPI) {
           const cfg = loadConfig();
           const current = cfg ? `${cfg.provider}/${cfg.model}` : "";
           const lines = models.map((m) => {
-            const tag = `${m.provider}/${m.id}` === current ? " ← current" : "";
+            const tag = `${m.provider}/${m.id}` === current ? " ● current" : "";
             return `${m.provider}/${m.id}${tag}`;
           });
           ctx.ui.notify(`Available vision models:\n${lines.join("\n")}`, "info");
@@ -433,7 +436,7 @@ export default function (pi: ExtensionAPI) {
         default: {
           const cfg = loadConfig();
           ctx.ui.notify(
-            `Usage: /vision status | set <provider> <model> | list | enable | disable | test [path]\n${statusText(ctx, cfg)}`,
+            `Usage: /vision status | set <provider> <model> | list | enable | disable | test [path]\n${STATUS_DIVIDER}\n${statusText(ctx, cfg)}`,
             statusLevel(cfg),
           );
           return;
