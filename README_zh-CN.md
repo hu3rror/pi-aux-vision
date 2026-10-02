@@ -113,7 +113,7 @@ return { failed: summary.filter((s) => s.error).length, items: summary };
 
 ## 兼容性
 
-已针对 pi `1.0.0` 验证。peer dependency 范围仍为 `"*"`;源码通过 `npm run typecheck` 对当前 SDK 进行类型检查。结构化结果(`outputSchema`)与 codemode 需要 pi `1.0.0+`;在旧版 pi 上工具回退为纯文本契约。
+**最低支持 pi 版本:`1.0.0`** —— 结构化结果(`structuredContent`)基于 `outputSchema` 工具 API,而 codemode 本身就是 pi 1.0.0 的功能,因此不支持 pi `< 1.0.0`:扩展仅针对 pi `1.0.0+` 做类型检查与验证。peer dependency 范围仍为 `"*"`,保证包在任何环境都能安装且不产生 peer 警告。
 
 ## 开发
 

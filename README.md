@@ -113,7 +113,7 @@ This capability is **dormant until codemode is enabled** — add `"codemode"` to
 
 ## Compatibility
 
-Verified against pi `1.0.0`. The peer dependency range stays `"*"`; the source type-checks against the current SDK via `npm run typecheck`. Structured results (`outputSchema`) and codemode require pi `1.0.0+`; on older pi versions the tool falls back to its text-only contract.
+**Minimum supported pi version: `1.0.0`** — the structured result (`structuredContent`) builds on the `outputSchema` tool API, and codemode is itself a pi 1.0.0 feature, so pi `< 1.0.0` is not supported: the extension type-checks and is verified only against pi `1.0.0+`. The peer dependency range stays `"*"` so the package installs anywhere without peer warnings.
 
 ## Development
 
