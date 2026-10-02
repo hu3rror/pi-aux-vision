@@ -66,17 +66,17 @@ export function formatContextWindow(n: number): string {
   return `${n}`;
 }
 
-/** provider 选择器说明列:`22 个模型` / `2 个模型 · 1 未认证`。 */
+/** Provider selector description column: `22 models` / `2 models · 1 unauthenticated`. */
 export function formatProviderDescription(total: number, authed: number): string {
   return authed < total
-    ? `${total} 个模型 · ${total - authed} 未认证`
-    : `${total} 个模型`;
+    ? `${total} models · ${total - authed} unauthenticated`
+    : `${total} models`;
 }
 
-/** 模型选择器说明列:`1M ctx · 协议`,未认证追加 `· 需 /login`。 */
+/** Model selector description column: `1M ctx · api`, unauthenticated appends `· needs /login`. */
 export function formatModelDescription(model: Model<Api>, authed: boolean): string {
   const base = `${formatContextWindow(model.contextWindow)} ctx · ${model.api}`;
-  return authed ? base : `${base} · 需 /login`;
+  return authed ? base : `${base} · needs /login`;
 }
 
 /**

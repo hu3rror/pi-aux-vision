@@ -61,17 +61,17 @@ export async function describeImage(
     stat = await fs.stat(filePath);
   } catch {
     return errorResult(
-      `图片文件不存在: ${filePath}。请先确认文件已落盘(截图/导出/生成均可),并检查路径是否正确。`,
+      `Image file does not exist: ${filePath}. Make sure the file is on disk (screenshot, export, or generated) and check the path.`,
     );
   }
   if (!stat.isFile()) {
-    return errorResult(`路径不是文件: ${filePath}`);
+    return errorResult(`Path is not a file: ${filePath}`);
   }
 
   const mimeType = await detectSupportedImageMimeTypeFromFile(filePath);
   if (!mimeType) {
     return errorResult(
-      `不支持的图片格式: ${params.image_path}(支持 png / jpeg / gif / webp / bmp)。`,
+      `Unsupported image format: ${params.image_path} (supported: png / jpeg / gif / webp / bmp).`,
     );
   }
 
@@ -83,11 +83,11 @@ export async function describeImage(
     const resized = await resizeImage(bytes, mimeType, { maxBytes: MAX_IMAGE_BYTES });
     if (!resized) {
       return errorResult(
-        `图片 ${formatSize(stat.size)} 超过 10MB 上限且无法自动压缩,请手动缩小图片后重试。`,
+        `Image ${formatSize(stat.size)} exceeds the 10MB limit and could not be auto-compressed; shrink the image and retry.`,
       );
     }
     bytes = Buffer.from(resized.data, "base64");
-    resizeNote = `(原图 ${formatSize(stat.size)} 已压缩至 ${formatSize(bytes.byteLength)})`;
+    resizeNote = `(original ${formatSize(stat.size)} compressed to ${formatSize(bytes.byteLength)})`;
   }
 
   const base64 = bytes.toString("base64");
@@ -118,14 +118,14 @@ export async function describeImage(
     );
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return errorResult(`视觉模型调用失败: ${msg}`);
+    return errorResult(`Vision model call failed: ${msg}`);
   }
 
   if (result.stopReason === "error") {
-    return errorResult(`视觉模型返回错误: ${result.errorMessage ?? "unknown"}`);
+    return errorResult(`Vision model returned an error: ${result.errorMessage ?? "unknown"}`);
   }
   if (result.stopReason === "aborted") {
-    return errorResult("视觉模型调用已取消");
+    return errorResult("Vision model call was aborted");
   }
 
   const text = result.content
@@ -134,13 +134,13 @@ export async function describeImage(
     .join("\n")
     .trim();
   if (!text) {
-    return errorResult("视觉模型没有返回文本内容");
+    return errorResult("Vision model returned no text content");
   }
 
   // 截断显式化(ADR-0002):SDK 在输出撞到 maxTokens 时标记 stopReason "length",
   // 此时转录底座可能不完整,必须在头部显式告知,而不是把残缺底座静默交回盲模型。
   const body =
-    result.stopReason === "length" ? `${truncationNoticeFor(params.question)}\n${text}` : text;
+    result.stopReason === "length" ? `${truncationNotice()}\n${text}` : text;
 
   return {
     content: [{ type: "text", text: resizeNote ? `${body}\n${resizeNote}` : body }],
@@ -152,13 +152,11 @@ export async function describeImage(
 }
 
 // 截断显式化提示语(ADR-0002):头部告知底座可能不完整,并把重调主动权交回调用方。
-// 语言跟随提问语言,与 prompt 的"同语言作答"规则一致:CJK 提问用中文,否则英文。
-function truncationNoticeFor(question: string): string {
-  const cjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/;
-  return cjk.test(question)
-    ? "注意:视觉模型输出已达 token 上限,转录底座可能不完整,截断通常发生在尾部。" +
-      "如需完整内容,请缩小范围或用更聚焦的 question 重新调用 describe_image。"
-    : "Note: the vision model's output hit the token limit, so the transcription base may be incomplete " +
-      "(truncation usually cuts the tail). To get the full content, narrow the scope or call describe_image " +
-      "again with a more focused question.";
+// 固定英文:提示语属于工具输出的稳定契约,不跟随提问语言(ADR-0002)。
+function truncationNotice(): string {
+  return (
+    "Note: the vision model's output hit the token limit, so the transcription base may be incomplete " +
+    "(truncation usually cuts the tail). To get the full content, narrow the scope or call describe_image " +
+    "again with a more focused question."
+  );
 }

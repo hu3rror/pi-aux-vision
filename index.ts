@@ -3,7 +3,7 @@ import type { SelectItem } from "@earendil-works/pi-tui";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { DEFAULT_CONFIG, legacyConfigPath, loadConfig, resolveConfigFile, saveConfig, type AuxVisionConfig } from "./config";
-import { findConfiguredModel, findFirstVisionModel, formatModelDescription, formatProviderDescription, groupVisionProviders, isVisionModel, listVisionModels, resolveVisionCandidates } from "./discovery";
+import { findConfiguredModel, findFirstVisionModel, formatContextWindow, formatModelDescription, formatProviderDescription, groupVisionProviders, isVisionModel, listVisionModels, resolveVisionCandidates } from "./discovery";
 import { describeImage, isErrorResult, type DescribeImageResult } from "./vision";
 import { generateTestImage } from "./test-image";
 import { createFooterController } from "./footer-controller";
@@ -11,12 +11,15 @@ import { createFooterController } from "./footer-controller";
 import { pickFromList } from "./ui";
 
 const TOOL_NAME = "describe_image";
-const TEST_QUESTION = "描述这张测试图:复述图中所有文字,并说明红、蓝、绿色块分别是什么颜色。";
+const TEST_QUESTION =
+  "Describe this test image: repeat all visible text, and state which colors the red, blue, and green blocks are.";
 
 export default function (pi: ExtensionAPI) {
   let toolRegistered = false;
   /** 旧路径回退通知:每会话一次(ADR-0003)。 */
   let legacyNotified = false;
+  /** getArgumentCompletions has no ExtensionContext; cache the registry from session_start (pattern from pi's built-in mcp extension). */
+  let modelRegistry: ExtensionContext["modelRegistry"] | null = null;
 
   // footer controller:状态与 footer key 收在闭包,事件点一行转发
   const footer = createFooterController();
@@ -38,7 +41,7 @@ export default function (pi: ExtensionAPI) {
     const prev = loadConfig() ?? { ...DEFAULT_CONFIG, provider: "", model: "" };
     const fresh: AuxVisionConfig = { ...prev, enabled: true, provider, model: modelId };
     saveConfig(fresh);
-    return `aux-vision: 已配置并启用 ${provider}/${modelId}。`;
+    return `aux-vision: configured and enabled ${provider}/${modelId}.`;
   }
 
   /** 加载即注册;注册后立即移出可见集合(pi 0.86 无 defaultActive,稳态等价,ADR-0004)。 */
@@ -85,7 +88,7 @@ export default function (pi: ExtensionAPI) {
     const cfg = loadConfig();
     if (!cfg || !cfg.enabled || !cfg.provider || !cfg.model) {
       const text =
-        "aux-vision 插件未启用。运行 /vision status 查看状态,用 /vision set <provider> <model> 配置视觉模型。";
+        "aux-vision plugin is not enabled. Run /vision status for details, or /vision set <provider> <model> to configure a vision model.";
       return {
         content: [{ type: "text", text }],
         details: { error: text },
@@ -93,7 +96,7 @@ export default function (pi: ExtensionAPI) {
     }
     const model = findConfiguredModel(ctx, cfg.provider, cfg.model);
     if (!model) {
-      const text = `配置的视觉模型 ${cfg.provider}/${cfg.model} 当前不可用(不存在或未认证)。运行 /vision list 查看可用模型。`;
+      const text = `The configured vision model ${cfg.provider}/${cfg.model} is unavailable (not found or not authenticated). Run /vision list to see available models.`;
       return {
         content: [{ type: "text", text }],
         details: { error: text },
@@ -126,7 +129,7 @@ export default function (pi: ExtensionAPI) {
       if (!m) {
         ensureToolActive(false);
         ctx.ui.notify(
-          "aux-vision: 未检测到可用的图像识别模型,插件未启用。用 /vision set <provider> <model> 配置。",
+          "aux-vision: no vision-capable model detected; plugin not enabled. Configure one with /vision set <provider> <model>.",
           "warning",
         );
         return inactive;
@@ -135,7 +138,7 @@ export default function (pi: ExtensionAPI) {
       saveConfig({ ...base, provider: m.provider, model: m.id });
       ensureToolActive(true);
       ctx.ui.notify(
-        `aux-vision: 已自动配置视觉模型 ${m.provider}/${m.id},describe_image 已介入。用 /vision set 或 /vision test 调整/验证。`,
+        `aux-vision: automatically configured vision model ${m.provider}/${m.id}; describe_image is now exposed. Tune with /vision set or verify with /vision test.`,
         "info",
       );
       return { activated: true, announced: true };
@@ -151,7 +154,7 @@ export default function (pi: ExtensionAPI) {
       if (!fallback) {
         ensureToolActive(false);
         ctx.ui.notify(
-          "aux-vision: 配置的模型不可用,且当前没有其他可用的图像识别模型,插件未启用。",
+          "aux-vision: the configured model is unavailable and no other vision-capable model is available; plugin not enabled.",
           "warning",
         );
         return inactive;
@@ -160,7 +163,7 @@ export default function (pi: ExtensionAPI) {
       saveConfig(fresh);
       ensureToolActive(true);
       ctx.ui.notify(
-        `aux-vision: 配置的模型 ${cfg!.provider}/${cfg!.model} 不可用,已回退至 ${fallback.provider}/${fallback.id} 并写入配置。`,
+        `aux-vision: configured model ${cfg!.provider}/${cfg!.model} is unavailable; fell back to ${fallback.provider}/${fallback.id} and saved the config.`,
         "warning",
       );
       return { activated: true, announced: true };
@@ -173,20 +176,36 @@ export default function (pi: ExtensionAPI) {
 
   /** 门控状态描述:/vision status 展示用(ADR-0004)。 */
   function gatingNote(ctx: ExtensionContext, cfg: AuxVisionConfig | null): string {
-    if (!cfg) return "门控:未配置视觉模型,describe_image 不介入";
-    if (!cfg.enabled) return "门控:插件已禁用,describe_image 不介入";
-    if (!cfg.provider || !cfg.model) return "门控:未配置视觉模型,describe_image 不介入";
-    if (!ctx.model) return "门控:当前模型未定,describe_image 暂不介入";
+    if (!cfg) return "Gating: no vision model configured; describe_image is not exposed";
+    if (!cfg.enabled) return "Gating: plugin disabled; describe_image is not exposed";
+    if (!cfg.provider || !cfg.model) return "Gating: no vision model configured; describe_image is not exposed";
+    if (!ctx.model) return "Gating: session model not set; describe_image not exposed yet";
     return isVisionModel(ctx.model)
-      ? "门控:当前模型支持原生读图,describe_image 未介入"
-      : "门控:当前模型不支持读图,describe_image 已介入";
+      ? "Gating: session model reads images natively; describe_image is not exposed"
+      : "Gating: session model cannot read images; describe_image is exposed";
   }
 
   /** 门控反馈后缀:当前模型具读图能力时追加说明,避免"已配置并启用"误导(ADR-0004)。 */
   function gatingSuffix(ctx: ExtensionContext): string {
     return ctx.model && isVisionModel(ctx.model)
-      ? "当前模型支持原生读图,describe_image 保持不介入。"
+      ? "The session model reads images natively, so describe_image stays unexposed."
       : "";
+  }
+
+  /** 未配置/未启用 → warning,有效启用态 → info。 */
+  function statusLevel(cfg: AuxVisionConfig | null): "info" | "warning" {
+    return cfg && cfg.provider && cfg.model && cfg.enabled ? "info" : "warning";
+  }
+
+  function statusText(ctx: ExtensionContext, cfg: AuxVisionConfig | null): string {
+    if (!cfg || !cfg.provider || !cfg.model) {
+      return `aux-vision: no vision model configured; plugin not enabled.\n${gatingNote(ctx, cfg)}`;
+    }
+    const model = findConfiguredModel(ctx, cfg.provider, cfg.model);
+    const detail = model
+      ? `api ${model.api} | context ${formatContextWindow(model.contextWindow)} | max output ${model.maxTokens}`
+      : "(model currently unavailable)";
+    return `aux-vision: ${cfg.enabled ? "enabled" : "disabled"} | ${cfg.provider}/${cfg.model} | footer: ${cfg.showInFooter ? "on" : "off"}\n${detail}\n${gatingNote(ctx, cfg)}`;
   }
 
   /** 写入选择并同步门控:通知(含门控后缀)+ 单点同步 + footer 事件(ADR-0004)。 */
@@ -196,15 +215,40 @@ export default function (pi: ExtensionAPI) {
     footer.on({ type: footerEvent }, ctx.ui);
   }
 
+  /** Completion for `set `: authenticated vision models only (no unauthenticated fallback, unlike the picker). */
+  function visionModelCompletions(argumentPrefix: string): AutocompleteItem[] {
+    if (!modelRegistry) return [];
+    const [, afterSet] = /^set\s+(.*)$/.exec(argumentPrefix.trimStart()) ?? [];
+    const parts = (afterSet ?? "").trim().split(/\s+/);
+    const providerPart = parts[0] ?? "";
+    const modelPart = parts[1] ?? "";
+    const cfg = loadConfig();
+    const currentKey = cfg ? `${cfg.provider}/${cfg.model}` : "";
+    return modelRegistry
+      .getAvailable()
+      .filter(isVisionModel)
+      .filter((m) => m.provider.startsWith(providerPart))
+      .filter((m) => !modelPart || m.id.startsWith(modelPart))
+      .map((m) => {
+        const tag = `${m.provider}/${m.id}` === currentKey ? " · ← current" : "";
+        return {
+          value: `set ${m.provider} ${m.id}`,
+          label: `${m.provider}/${m.id}`,
+          description: `${formatModelDescription(m, true)}${tag}`,
+        };
+      });
+  }
+
   pi.on("session_start", (_event, ctx) => {
     // 新会话:footer 回到未触发(不显示);门控通知按会话重置
     footer.on({ type: "reset" }, ctx.ui);
+    modelRegistry = ctx.modelRegistry;
     legacyNotified = false;
     // 旧路径回退:每会话一次,仅旧配置实际可读时通知,不引导迁移命令(ADR-0003)
     if (resolveConfigFile()?.source === "legacy" && loadConfig() !== null && !legacyNotified) {
       legacyNotified = true;
       ctx.ui.notify(
-        `aux-vision: 正在使用旧路径配置(${legacyConfigPath()}),配置变更时将自动写入新路径。`,
+        `aux-vision: using config from the legacy path (${legacyConfigPath()}); the next config change will be written to the new path.`,
         "info",
       );
     }
@@ -215,7 +259,7 @@ export default function (pi: ExtensionAPI) {
     // 盲→视觉:静默退出;视觉→盲:工具出现且无自带通知时提示一次(ADR-0004)
     const { activated, announced } = syncToolVisibility(ctx);
     if (activated && !announced) {
-      ctx.ui.notify("aux-vision: describe_image 已介入(当前模型不支持读图)。", "info");
+      ctx.ui.notify("aux-vision: describe_image is now exposed (session model cannot read images).", "info");
     }
   });
 
@@ -229,7 +273,7 @@ export default function (pi: ExtensionAPI) {
           .map((s) => ({ value: s, label: s }));
       }
       if (prefix.trimStart().startsWith("set ")) {
-        return [{ value: "set <provider> <model>", label: "set <provider> <model> — e.g. set google gemini-2.5-flash" }];
+        return visionModelCompletions(prefix);
       }
       if (prefix.trimStart().startsWith("test ")) {
         return [{ value: "test <path>", label: "test <path> — test with a specific image file" }];
@@ -242,18 +286,7 @@ export default function (pi: ExtensionAPI) {
       switch (sub) {
         case "status": {
           const cfg = loadConfig();
-          if (!cfg || !cfg.provider || !cfg.model) {
-            ctx.ui.notify(`aux-vision: 未配置视觉模型,插件未启用。\n${gatingNote(ctx, cfg)}`, "warning");
-            return;
-          }
-          const model = findConfiguredModel(ctx, cfg.provider, cfg.model);
-          const detail = model
-            ? `协议 ${model.api} | 上下文 ${model.contextWindow} | 输出上限 ${model.maxTokens}`
-            : "(模型当前不可用)";
-          ctx.ui.notify(
-            `aux-vision: ${cfg.enabled ? "启用" : "已禁用"} | ${cfg.provider}/${cfg.model} | footer 显示:${cfg.showInFooter ? "开" : "关"}\n${detail}\n${gatingNote(ctx, cfg)}`,
-            cfg.enabled ? "info" : "warning",
-          );
+          ctx.ui.notify(statusText(ctx, cfg), statusLevel(cfg));
           return;
         }
         case "set": {
@@ -262,7 +295,7 @@ export default function (pi: ExtensionAPI) {
           if (!provider || !modelId) {
             // 交互式选择:provider → model,行为对齐 /login
             if (!ctx.hasUI) {
-              ctx.ui.notify("用法:/vision set <provider> <model>,例如 /vision set google gemini-2.5-flash。", "warning");
+              ctx.ui.notify("Usage: /vision set <provider> <model>, e.g. /vision set google gemini-2.5-flash.", "warning");
               return;
             }
             // 候选:已认证优先;无已认证才退全量(避免内置目录 30+ provider 铺满选择器)
@@ -271,7 +304,7 @@ export default function (pi: ExtensionAPI) {
               ctx.modelRegistry.getAll(),
             );
             if (candidates.length === 0) {
-              ctx.ui.notify("当前没有任何支持图像输入的模型(未注册或未认证)。", "warning");
+              ctx.ui.notify("No vision-capable models available (none registered or authenticated).", "warning");
               return;
             }
             const cfg = loadConfig();
@@ -284,9 +317,9 @@ export default function (pi: ExtensionAPI) {
               description: formatProviderDescription(g.total, g.authed),
             }));
             const providerIdx = providerItems.findIndex((it) => it.value === cfg?.provider);
-            const pickedProvider = await pickFromList(ctx, "选择视觉模型 provider:", providerItems, providerIdx);
+            const pickedProvider = await pickFromList(ctx, "Select a vision model provider:", providerItems, providerIdx);
             if (!pickedProvider) {
-              ctx.ui.notify("已取消。", "info");
+              ctx.ui.notify("Cancelled.", "info");
               return;
             }
             const group = groups.find((g) => g.provider === pickedProvider)!;
@@ -296,15 +329,16 @@ export default function (pi: ExtensionAPI) {
               description: formatModelDescription(m, ctx.modelRegistry.hasConfiguredAuth(m)),
             }));
             const modelIdx = modelItems.findIndex((it) => it.value === cfg?.model);
-            const pickedModel = await pickFromList(ctx, `选择 ${group.provider} 的视觉模型:`, modelItems, modelIdx);
+            const pickedModel = await pickFromList(ctx, `Select a vision model from ${group.provider}:`, modelItems, modelIdx);
             if (!pickedModel) {
-              ctx.ui.notify("已取消。", "info");
+              ctx.ui.notify("Cancelled.", "info");
               return;
             }
             const model = group.models.find((m) => m.id === pickedModel)!;
             if (!ctx.modelRegistry.hasConfiguredAuth(model)) {
               ctx.ui.notify(
-                `模型 ${group.provider}/${model.id} 尚未认证。请先执行 /login ${group.provider} 完成认证,再重新 /vision set。`,"warning",
+                `Model ${group.provider}/${model.id} is not authenticated. Run /login ${group.provider} first, then /vision set again.`,
+                "warning",
               );
               return;
             }
@@ -313,7 +347,7 @@ export default function (pi: ExtensionAPI) {
           }
           const model = findConfiguredModel(ctx, provider, modelId);
           if (!model) {
-            ctx.ui.notify(`模型 ${provider}/${modelId} 不可用(不存在、不支持图像输入或未认证)。运行 /vision list 查看可用模型。`, "error");
+            ctx.ui.notify(`Model ${provider}/${modelId} is unavailable (does not exist, does not accept images, or is not authenticated). Run /vision list to see available models.`, "error");
             return;
           }
           applyAndSync(provider, modelId, "set", ctx);
@@ -322,16 +356,16 @@ export default function (pi: ExtensionAPI) {
         case "list": {
           const models = listVisionModels(ctx);
           if (models.length === 0) {
-            ctx.ui.notify("aux-vision: 当前没有可用(已认证)的图像识别模型。请先 /login 配置对应 provider。", "warning");
+            ctx.ui.notify("aux-vision: no authenticated vision-capable models available. Run /login for the provider you want to use.", "warning");
             return;
           }
           const cfg = loadConfig();
           const current = cfg ? `${cfg.provider}/${cfg.model}` : "";
           const lines = models.map((m) => {
-            const tag = `${m.provider}/${m.id}` === current ? " ← 当前" : "";
+            const tag = `${m.provider}/${m.id}` === current ? " ← current" : "";
             return `${m.provider}/${m.id}${tag}`;
           });
-          ctx.ui.notify(`可用的图像识别模型:\n${lines.join("\n")}`, "info");
+          ctx.ui.notify(`Available vision models:\n${lines.join("\n")}`, "info");
           return;
         }
         case "enable": {
@@ -343,9 +377,9 @@ export default function (pi: ExtensionAPI) {
             const m = findFirstVisionModel(ctx);
             if (m) {
               cfg = { ...cfg, provider: m.provider, model: m.id };
-              ctx.ui.notify(`aux-vision: 自动选用 ${m.provider}/${m.id}。`, "info");
+              ctx.ui.notify(`aux-vision: auto-selected ${m.provider}/${m.id}.`, "info");
             } else {
-              ctx.ui.notify("aux-vision: 没有可用的图像识别模型,请先 /login 或 /vision set。", "warning");
+              ctx.ui.notify("aux-vision: no vision-capable model available; run /login or /vision set first.", "warning");
               return;
             }
           }
@@ -358,23 +392,23 @@ export default function (pi: ExtensionAPI) {
           saveConfig(fresh);
           // 走单点同步:disabled 状态由门控统一处理为不介入(ADR-0004)
           syncToolVisibility(ctx);
-          ctx.ui.notify("aux-vision: 已禁用,describe_image 工具不再对模型可见。", "info");
+          ctx.ui.notify("aux-vision: disabled; describe_image is no longer exposed to the model.", "info");
           footer.on({ type: "disable" }, ctx.ui);
           return;
         }
         case "test": {
           const cfg = loadConfig();
           if (!cfg || !cfg.enabled || !cfg.provider || !cfg.model) {
-            ctx.ui.notify("aux-vision: 未启用,无法测试。先 /vision set 或 /vision enable。", "warning");
+            ctx.ui.notify("aux-vision: not enabled; cannot test. Run /vision set or /vision enable first.", "warning");
             return;
           }
           const model = findConfiguredModel(ctx, cfg.provider, cfg.model);
           if (!model) {
-            ctx.ui.notify(`模型 ${cfg.provider}/${cfg.model} 不可用,无法测试。运行 /vision list。`, "error");
+            ctx.ui.notify(`Model ${cfg.provider}/${cfg.model} is unavailable; cannot test. Run /vision list.`, "error");
             return;
           }
           const imagePath = parts.slice(1).join(" ") || (await generateTestImage());
-          ctx.ui.notify(`aux-vision: 正在用 ${cfg.provider}/${cfg.model} 分析 ${imagePath} ...`, "info");
+          ctx.ui.notify(`aux-vision: analyzing ${imagePath} with ${cfg.provider}/${cfg.model} ...`, "info");
           const result = await describeImage(
             { image_path: imagePath, question: TEST_QUESTION },
             ctx,
@@ -386,20 +420,21 @@ export default function (pi: ExtensionAPI) {
           const testFailed = isErrorResult(result);
           footer.on({ type: "call", ok: !testFailed }, ctx.ui);
           if (testFailed) {
-            ctx.ui.notify(`aux-vision 测试失败:${result.content[0].text}`, "error");
+            ctx.ui.notify(`aux-vision test failed: ${result.content[0].text}`, "error");
             return;
           }
           const text = result.content[0].text;
           ctx.ui.notify(
-            `aux-vision 测试通过(${cfg.provider}/${cfg.model}):${text.slice(0, 300)}${text.length > 300 ? " …" : ""}`,
+            `aux-vision test passed (${cfg.provider}/${cfg.model}): ${text.slice(0, 300)}${text.length > 300 ? " …" : ""}`,
             "info",
           );
           return;
         }
         default: {
+          const cfg = loadConfig();
           ctx.ui.notify(
-            "用法:/vision status | set <provider> <model> | list | enable | disable | test [path]",
-            "info",
+            `Usage: /vision status | set <provider> <model> | list | enable | disable | test [path]\n${statusText(ctx, cfg)}`,
+            statusLevel(cfg),
           );
           return;
         }

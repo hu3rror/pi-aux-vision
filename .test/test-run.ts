@@ -114,14 +114,14 @@ function ok(name: string) {
   const model = findConfiguredModel(ctx, cfg.provider, cfg.model)!;
   const missing = await describeImage({ image_path: tmpfile("nope.png"), question: "?" }, ctx, model, cfg, undefined);
   assert.ok("error" in missing.details, "missing file carries error marker");
-  assert.match(missing.details.error, /不存在/);
-  assert.match(missing.content[0].text, /不存在/);
+  assert.match(missing.details.error, /does not exist/);
+  assert.match(missing.content[0].text, /does not exist/);
   ok("missing file -> error");
   const doc = tmpfile("doc.txt");
   fs.writeFileSync(doc, "hello");
   const badType = await describeImage({ image_path: doc, question: "?" }, ctx, model, cfg, undefined);
   assert.ok("error" in badType.details);
-  assert.match(badType.content[0].text, /不支持的图片格式/);
+  assert.match(badType.content[0].text, /Unsupported image format/);
   ok("unsupported format -> error");
   const boom = await describeImage({ image_path: writePng("boom.png"), question: "?" }, makeFakeCtx(async () => {
     throw new Error("401 unauthorized");
@@ -144,7 +144,7 @@ function ok(name: string) {
   assert.ok(!("isError" in okRes), "success result carries no isError field (ADR-0001)");
   const failRes = await describeImage({ image_path: tmpfile("contract-nope.png"), question: "?" }, ctx, model, cfg, undefined);
   assert.ok("error" in failRes.details, "failure result carries error marker");
-  assert.match(failRes.details.error, /不存在/);
+  assert.match(failRes.details.error, /does not exist/);
   assert.ok(!("isError" in failRes), "failure result carries no isError field (ADR-0001)");
   ok("tool result contract: details.error discriminates, no isError field");
 }
@@ -174,15 +174,15 @@ function ok(name: string) {
   assert.ok(!("error" in res.details), "truncation stays a success result (ADR-0002)");
   assert.strictEqual(res.details.model, "sensenova-anthropic/sensenova-6.8-flash-lite");
   assert.strictEqual(res.details.usage.totalTokens, 30);
-  assert.match(res.content[0].text, /token limit/); // 英文提问 → 英文提示(语言跟随)
+  assert.match(res.content[0].text, /token limit/); // 固定英文提示
   assert.match(res.content[0].text, /部分转录/);
   assert.strictEqual(DEFAULT_CONFIG.maxOutputTokens, 8192, "default output budget raised for exhaustive base (ADR-0002)");
   ok("stopReason length -> truncation notice prepended, no silent truncation");
 
-  // 中文提问 → 中文提示(CJK 启发式)
+  // 中文提问 → 提示仍为固定英文(不跟随提问语言,ADR-0002)
   const resZh = await describeImage({ image_path: writePng("trunc-zh.png"), question: "图里是什么?" }, ctx, model, cfg, undefined);
-  assert.match(resZh.content[0].text, /token 上限/);
-  ok("truncation notice follows question language (CJK heuristic)");
+  assert.match(resZh.content[0].text, /token limit/);
+  ok("truncation notice is fixed English regardless of question language");
 }
 
 // ---- 6. 测试图生成(真实 PowerShell) ----
@@ -214,14 +214,14 @@ function ok(name: string) {
   assert.strictEqual(groups[1].total, 2);
   ok("groupVisionProviders counts authed/total per provider");
 
-  assert.strictEqual(formatProviderDescription(1, 1), "1 个模型");
-  assert.strictEqual(formatProviderDescription(2, 1), "2 个模型 · 1 未认证");
+  assert.strictEqual(formatProviderDescription(1, 1), "1 models");
+  assert.strictEqual(formatProviderDescription(2, 1), "2 models · 1 unauthenticated");
   ok("formatProviderDescription marks unauthenticated count");
 
   const m6 = groups[0].models[0];
   const mG25 = groups[1].models[0];
   assert.strictEqual(formatModelDescription(m6, true), "256K ctx · anthropic-messages");
-  assert.strictEqual(formatModelDescription(mG25, false), "1M ctx · google-generative-ai · 需 /login");
+  assert.strictEqual(formatModelDescription(mG25, false), "1M ctx · google-generative-ai · needs /login");
   ok("formatModelDescription shows ctx/api and auth marker");
 }
 
@@ -563,7 +563,7 @@ function ok(name: string) {
     ctx.model = blind;
     await fake.fire("model_select", { model: blind, previousModel: undefined, source: "restore" }, ctx);
     assert.ok(fake.pi.getActiveTools().includes("describe_image"), "switch to blind -> active");
-    assert.ok(ctx.uiNotifies.some((n) => n.text.includes("已介入")));
+    assert.ok(ctx.uiNotifies.some((n) => n.text.includes("is now exposed")));
     ctx.model = vision;
     await fake.fire("model_select", { model: vision, previousModel: blind, source: "set" }, ctx);
     assert.ok(!fake.pi.getActiveTools().includes("describe_image"), "switch to vision -> inactive");
@@ -586,7 +586,7 @@ function ok(name: string) {
     const written = loadConfig()!;
     assert.ok(written.provider && written.model);
     assert.ok(fake.pi.getActiveTools().includes("describe_image"));
-    assert.ok(ctx.uiNotifies.some((n) => n.text.includes("自动配置")));
+    assert.ok(ctx.uiNotifies.some((n) => n.text.includes("automatically configured")));
     ok("unconfigured blind session -> auto-discovery, canonical write, notify, active");
   }
 
@@ -597,7 +597,7 @@ function ok(name: string) {
     await cmd.handler("enable", ctx);
     assert.strictEqual(loadConfig()?.enabled, true, "config enabled: true");
     assert.ok(!fake.pi.getActiveTools().includes("describe_image"), "still gated off");
-    assert.ok(ctx.uiNotifies.some((n) => n.text.includes("不介入")), "feedback explains gating");
+    assert.ok(ctx.uiNotifies.some((n) => n.text.includes("unexposed")), "feedback explains gating");
     ok("/vision enable under vision model -> config on, tool gated, honest feedback");
   }
 
@@ -606,13 +606,13 @@ function ok(name: string) {
     const { fake, ctx: ctxB } = await boot(blind, () => saveConfig({ ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" }));
     const cmd = fake.command("vision")!;
     await cmd.handler("status", ctxB);
-    assert.ok(ctxB.uiNotifies.some((n) => n.text.includes("已介入")));
+    assert.ok(ctxB.uiNotifies.some((n) => n.text.includes("exposed")));
     const { ctx: ctxV } = await boot(vision, () => saveConfig({ ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" }));
     await cmd.handler("status", ctxV);
-    assert.ok(ctxV.uiNotifies.some((n) => n.text.includes("未介入")));
+    assert.ok(ctxV.uiNotifies.some((n) => n.text.includes("not exposed")));
     const { ctx: ctxN } = await boot(vision);
     await cmd.handler("status", ctxN);
-    assert.ok(ctxN.uiNotifies.some((n) => n.text.includes("门控") && n.text.includes("不介入")), "unconfigured status still surfaces gating");
+    assert.ok(ctxN.uiNotifies.some((n) => n.text.includes("Gating") && n.text.includes("not exposed")), "unconfigured status still surfaces gating");
     ok("/vision status surfaces gating state (configured + unconfigured)");
   }
 
@@ -630,7 +630,7 @@ function ok(name: string) {
     const { ctx } = await boot(blind, (dir) => {
       fs.writeFileSync(path.join(dir, "aux-vision.json"), JSON.stringify({ ...DEFAULT_CONFIG, provider: "sensenova-anthropic", model: "sensenova-6.8-flash-lite" }));
     });
-    const legacyNotices = ctx.uiNotifies.filter((n) => n.text.includes("旧路径"));
+    const legacyNotices = ctx.uiNotifies.filter((n) => n.text.includes("legacy path"));
     assert.strictEqual(legacyNotices.length, 1);
     assert.match(legacyNotices[0]!.text, /aux-vision.json/);
     ok("legacy fallback notified once per session");
@@ -639,8 +639,124 @@ function ok(name: string) {
     const { ctx: ctxCorrupt } = await boot(blind, (dir) => {
       fs.writeFileSync(path.join(dir, "aux-vision.json"), "{ not json");
     });
-    assert.ok(!ctxCorrupt.uiNotifies.some((n) => n.text.includes("旧路径")));
+    assert.ok(!ctxCorrupt.uiNotifies.some((n) => n.text.includes("legacy path")));
     ok("corrupt legacy file -> no legacy notice");
+  }
+}
+
+// ---- 13. /vision set 补全:仅已认证 vision 模型(provider/model),前缀过滤,当前标注 ----
+{
+  const vision = { provider: "google", id: "gemini-3.1-flash-lite", api: "google-generative-ai", input: ["text", "image"], contextWindow: 1048576, maxTokens: 65536 };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aux-vision-comp-"));
+  setTestAgentDir(dir);
+  const fake = makeFakePi();
+  extension(fake.pi as never);
+  fake.markReady();
+  const ctx = makeFakeCtx(undefined, vision as never);
+  await fake.fire("session_start", {}, ctx);
+  const cmd = fake.command("vision")! as unknown as {
+    getArgumentCompletions(p: string): { value: string; label: string; description?: string }[] | null;
+  };
+
+  // set + 空:全部已认证 vision 模型(provider/model),不含未认证与非 vision
+  const all = cmd.getArgumentCompletions("set ") ?? [];
+  assert.deepStrictEqual(
+    all.map((i) => i.label).sort(),
+    ["google/gemini-3.1-flash-lite", "sensenova-anthropic/sensenova-6.8-flash-lite"],
+  );
+  ok("set completion lists authenticated vision models only");
+
+  // provider 前缀过滤
+  const goo = cmd.getArgumentCompletions("set goo") ?? [];
+  assert.deepStrictEqual(goo.map((i) => i.label), ["google/gemini-3.1-flash-lite"]);
+  ok("set completion filters by provider prefix");
+
+  // provider + model 前缀;value 为完整可执行参数
+  const gm = cmd.getArgumentCompletions("set google gemini-3") ?? [];
+  assert.strictEqual(gm.length, 1);
+  assert.strictEqual(gm[0]!.value, "set google gemini-3.1-flash-lite");
+  ok("set completion filters by model prefix, yields runnable value");
+
+  // 未认证的 vision 模型不在补全中
+  assert.strictEqual((cmd.getArgumentCompletions("set google gemini-2") ?? []).length, 0);
+  ok("set completion excludes unauthenticated models");
+
+  // 当前配置的模型标注 ← current
+  saveConfig({ ...DEFAULT_CONFIG, provider: "google", model: "gemini-3.1-flash-lite" });
+  const cur = cmd.getArgumentCompletions("set ") ?? [];
+  const curItem = cur.find((i) => i.label === "google/gemini-3.1-flash-lite");
+  assert.ok(curItem?.description?.includes("current"), "current selection marked");
+  ok("set completion marks current selection");
+
+  // session_start 前(registry 未缓存)→ 空补全
+  const fake0 = makeFakePi();
+  extension(fake0.pi as never);
+  fake0.markReady();
+  const bare0 = (fake0.command("vision")! as unknown as { getArgumentCompletions(p: string): unknown[] }).getArgumentCompletions("set ");
+  assert.deepStrictEqual(bare0, []);
+  ok("set completion empty before session_start");
+}
+
+// ---- 14. 无参数 /vision = 用法+状态;status 保留且与 bare 同源(共享 statusText)----
+{
+  const blind = { provider: "sensenova", id: "deepseek-v4-flash", api: "openai-completions", input: ["text"], contextWindow: 1048576, maxTokens: 65536 };
+
+  async function bootStatus(model?: unknown, setup?: (dir: string) => void) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aux-vision-status-"));
+    setTestAgentDir(dir);
+    const fake = makeFakePi();
+    extension(fake.pi as never);
+    fake.markReady();
+    setup?.(dir);
+    const ctx = makeFakeCtx(undefined, model as never);
+    await fake.fire("session_start", {}, ctx);
+    return { fake, ctx };
+  }
+
+  // 已配置+启用:bare /vision 一条通知含用法与状态(level info)
+  {
+    const { fake, ctx } = await bootStatus(blind, () => saveConfig({ ...DEFAULT_CONFIG, provider: "google", model: "gemini-3.1-flash-lite" }));
+    await (fake.command("vision")! as never as { handler(a: string, c: unknown): Promise<unknown> }).handler("", ctx);
+    const n = ctx.uiNotifies.at(-1)!;
+    assert.match(n.text, /Usage:/);
+    assert.match(n.text, /enabled \| google\/gemini-3\.1-flash-lite/);
+    assert.match(n.text, /Gating:/);
+    assert.strictEqual(n.level, "info");
+    ok("bare /vision shows usage + status in one notification");
+  }
+
+  // /vision status 同源:同一状态块,但不带 Usage 行
+  {
+    const { fake, ctx } = await bootStatus(blind, () => saveConfig({ ...DEFAULT_CONFIG, provider: "google", model: "gemini-3.1-flash-lite" }));
+    await (fake.command("vision")! as never as { handler(a: string, c: unknown): Promise<unknown> }).handler("status", ctx);
+    const n = ctx.uiNotifies.at(-1)!;
+    assert.ok(!/Usage:/.test(n.text), "status output has no usage line");
+    assert.match(n.text, /enabled \| google\/gemini-3\.1-flash-lite/);
+    assert.match(n.text, /Gating:/);
+    ok("/vision status shows the same status block");
+  }
+
+  // 未配置:bare 为 warning,含用法与未配置状态(用视觉主模型,避免盲模型触发自动发现)
+  {
+    const vision = { provider: "google", id: "gemini-3.1-flash-lite", api: "google-generative-ai", input: ["text", "image"], contextWindow: 1048576, maxTokens: 65536 };
+    const { fake, ctx } = await bootStatus(vision);
+    await (fake.command("vision")! as never as { handler(a: string, c: unknown): Promise<unknown> }).handler("", ctx);
+    const n = ctx.uiNotifies.at(-1)!;
+    assert.match(n.text, /Usage:/);
+    assert.match(n.text, /no vision model configured/);
+    assert.strictEqual(n.level, "warning");
+    ok("bare /vision warns when unconfigured");
+  }
+
+  // enabled 但 provider/model 为空(手改/旧配置)→ 仍为 warning,级别与正文一致
+  {
+    const vision = { provider: "google", id: "gemini-3.1-flash-lite", api: "google-generative-ai", input: ["text", "image"], contextWindow: 1048576, maxTokens: 65536 };
+    const { fake, ctx } = await bootStatus(vision, () => saveConfig({ ...DEFAULT_CONFIG, provider: "", model: "" }));
+    await (fake.command("vision")! as never as { handler(a: string, c: unknown): Promise<unknown> }).handler("", ctx);
+    const n = ctx.uiNotifies.at(-1)!;
+    assert.match(n.text, /no vision model configured/);
+    assert.strictEqual(n.level, "warning");
+    ok("bare /vision warns when enabled but provider/model unset");
   }
 }
 
