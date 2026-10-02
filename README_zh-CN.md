@@ -89,7 +89,8 @@ pi -e npm:pi-aux-vision
 
 ```js
 // @options: {"timeout_ms": 300000}
-const files = ["/tmp/shot-a.png", "/tmp/shot-b.png", "/tmp/shot-c.png"];
+// image_path 按 pi 的工作目录解析:脚本里用绝对路径最稳。
+const files = ["C:/path/to/shot-a.png", "C:/path/to/shot-b.png", "C:/path/to/shot-c.png"];
 const results = await Promise.allSettled(
   files.map((f) =>
     tools.describe_image({

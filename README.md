@@ -89,7 +89,8 @@ The tool declares an `outputSchema`, so [codemode](https://github.com/earendil-w
 
 ```js
 // @options: {"timeout_ms": 300000}
-const files = ["/tmp/shot-a.png", "/tmp/shot-b.png", "/tmp/shot-c.png"];
+// image_path resolves against pi's working directory: use absolute paths in scripts.
+const files = ["C:/path/to/shot-a.png", "C:/path/to/shot-b.png", "C:/path/to/shot-c.png"];
 const results = await Promise.allSettled(
   files.map((f) =>
     tools.describe_image({
