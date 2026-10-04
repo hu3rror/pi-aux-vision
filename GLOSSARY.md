@@ -50,3 +50,7 @@ _Avoid_: 保证句
 **truncation surfacing / 截断显式化**:
 Detecting `stopReason: "length"` (output hit the token cap) and prepending an explicit notice — phrased in the question's language — that the transcription base may be incomplete, instead of silently returning a partial base and leaving the non-visual main model to guess.
 _Avoid_: 静默截断
+
+**seam / 接缝**:
+Any point where the extension relies on pi beyond a stable public contract: the SDK types and APIs it imports, the behavior semantics it depends on (`stopReason` values, retry policy, the tool-result contract), and the npm dependency posture. A pi upgrade can change a seam silently (deep `dist/` imports, prototype patches, mirror tables), so every pi follow re-verifies each seam against the new dist before touching code (ADR-0006).
+_Avoid_: 内部接口(只指 API 面,漏掉行为语义与依赖姿态),依赖面(只指 npm 侧)

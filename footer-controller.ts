@@ -5,7 +5,7 @@
  * 本模块只做接线:持有会话内状态与 footer key(闭包内)、每次事件重读磁盘配置、
  * 把状态投影为上色文本写入 ui。
  *
- * 窄 seam:`FooterUI = { setStatus; theme }`,扩展入口的 ctx.ui 结构上满足,
+ * 窄接口:`FooterUI = { setStatus; theme }`,扩展入口的 ctx.ui 结构上满足,
  * 事件点以 footer.on(event, ctx.ui) 一行转发。
  *
  * 事件处理链(每次事件):reduceFooter(转移状态)→ loadConfig(重读配置)
