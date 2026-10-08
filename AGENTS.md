@@ -16,4 +16,4 @@ Single-context layout (one `GLOSSARY.md` + `docs/adr/` at the repo root). See `d
 
 ### Releases
 
-发布流:`push refs/tags/vX.Y.Z` 触发 `.github/workflows/publish.yml` 自动把当前版本 staging 到 npm 暂存区(不直接发布)。Agent 负责 bump 版本、commit、打 annotated tag、push(`git push origin main` + `git push origin refs/tags/vX.Y.Z`),workflow 跑通后撰写分类发布说明并创建 GitHub Release(见 npm-release skill),然后停下交还 stage-id;最终发布由维护者本地执行 `npm stage approve <stage-id>`(2FA 证明在场),Agent 不代跑。错误暂存可 `npm stage reject <stage-id>`(2FA)。
+发布流:`push refs/tags/vX.Y.Z` 触发 `.github/workflows/publish.yml` 经 Trusted Publisher(OIDC)直接把当前版本发布到 npmjs——**tag push 即发布,全自动,无人工 2FA 闸门**。Agent 负责 bump 版本、commit、打 annotated tag、push(`git push origin main` + `git push origin refs/tags/vX.Y.Z`),workflow 发布成功后撰写分类发布说明,用 `gh release edit` 覆盖 workflow 建的占位 Release(见 npm-release skill)。错误回滚:`npm unpublish <version>`(72 小时内,需本地登录态;超期用 `npm deprecate`)。前置:维护者在 npmjs.com 确认 Trusted Publisher 的 Allowed actions 允许 `npm publish`(直接发布),只允许 stage 时 CI 会 403。

@@ -1,9 +1,9 @@
-# 发布流水线:推送 v* 标签后,把当前版本自动 staging 到 npm 暂存区。
-# 不直接发布 —— 由维护者本地执行 `npm stage approve <stage-id>`(2FA)完成最终发布。
+# 发布流水线:推送 v* 标签后,经 Trusted Publisher(OIDC)直接把当前版本发布到 npmjs。
+# tag push 即发布,全自动,无人工 2FA 闸门。
 #
 # 前置条件(维护者已在 npmjs.com 配置,勿删):
 # - Trusted Publisher 绑定本仓库与 workflow 文件 `publish.yml`(OIDC 认证,无需任何 token)
-# - npm 账号开启 2FA(`npm stage approve`/`reject` 必需)
+# - 该配置的 Allowed actions 允许直接发布(npm publish)——只允许 stage 时会 403
 name: publish
 
 on:
@@ -12,12 +12,12 @@ on:
       - "v*"
 
 permissions:
-  contents: read
+  contents: write # 建占位 Release 需要(gh release create)
   id-token: write # npm --provenance(供应链来源证明)需要 OIDC token
 
 jobs:
-  stage:
-    name: Stage npm package
+  publish:
+    name: Publish npm package
     runs-on: windows-latest # 测试依赖 Windows PowerShell + System.Drawing(与开发环境一致)
     steps:
       - uses: actions/checkout@v7
@@ -48,7 +48,14 @@ jobs:
             exit 1
           fi
 
-      - name: Stage package on npm registry
+      - name: Publish to npm registry
         # Trusted Publishing(OIDC)自动认证并生成 provenance,无需 NODE_AUTH_TOKEN
-        run: npm stage publish --provenance
+        run: npm publish --provenance
+
+      # 占位 Release:只生成 "Full Changelog: vX...vY" 比较链接,正式分类说明由 agent
+      # 发布后按 write-release-notes skill 撰写并用 `gh release edit` 覆盖。
+      - name: Create GitHub Release (placeholder notes)
+        run: gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
